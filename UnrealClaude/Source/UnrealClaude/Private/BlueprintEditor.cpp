@@ -25,6 +25,7 @@ bool FBlueprintEditor::AddVariable(
 		return false;
 	}
 
+	// Check for existing variable
 	FName VarName(*VariableName);
 	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
 	{
@@ -35,6 +36,7 @@ bool FBlueprintEditor::AddVariable(
 		}
 	}
 
+	// Add the variable
 	if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, VarName, PinType))
 	{
 		OutError = TEXT("Failed to add variable");
@@ -59,6 +61,7 @@ bool FBlueprintEditor::RemoveVariable(
 
 	FName VarName(*VariableName);
 
+	// Verify variable exists
 	bool bFound = false;
 	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
 	{
@@ -100,6 +103,7 @@ bool FBlueprintEditor::AddFunction(
 		return false;
 	}
 
+	// Check for existing function
 	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
 	{
 		if (Graph && Graph->GetName() == FunctionName)
@@ -109,6 +113,7 @@ bool FBlueprintEditor::AddFunction(
 		}
 	}
 
+	// Create function graph
 	UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(
 		Blueprint,
 		FName(*FunctionName),
@@ -122,9 +127,11 @@ bool FBlueprintEditor::AddFunction(
 		return false;
 	}
 
+	// Initialize and add to Blueprint
 	// nullptr cast for UE 5.7 template deduction
 	FBlueprintEditorUtils::AddFunctionGraph(Blueprint, NewGraph, false, static_cast<UFunction*>(nullptr));
 
+	// Ensure function entry node exists
 	bool bHasEntry = false;
 	for (UEdGraphNode* Node : NewGraph->Nodes)
 	{
@@ -137,6 +144,7 @@ bool FBlueprintEditor::AddFunction(
 
 	if (!bHasEntry)
 	{
+		// Create function entry node
 		UK2Node_FunctionEntry* EntryNode = NewObject<UK2Node_FunctionEntry>(NewGraph);
 		EntryNode->CreateNewGuid();
 		EntryNode->PostPlacedNewNode();
@@ -160,6 +168,7 @@ bool FBlueprintEditor::RemoveFunction(
 		return false;
 	}
 
+	// Find function graph
 	UEdGraph* GraphToRemove = nullptr;
 	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
 	{
@@ -199,12 +208,14 @@ bool FBlueprintEditor::ValidateVariableName(const FString& VariableName, FString
 		return false;
 	}
 
+	// Must start with letter or underscore
 	if (!FChar::IsAlpha(VariableName[0]) && VariableName[0] != TEXT('_'))
 	{
 		OutError = TEXT("Variable name must start with a letter or underscore");
 		return false;
 	}
 
+	// Only alphanumeric and underscore
 	for (TCHAR C : VariableName)
 	{
 		if (!FChar::IsAlnum(C) && C != TEXT('_'))
@@ -219,6 +230,7 @@ bool FBlueprintEditor::ValidateVariableName(const FString& VariableName, FString
 
 bool FBlueprintEditor::ValidateFunctionName(const FString& FunctionName, FString& OutError)
 {
+	// Same validation rules as variables
 	if (FunctionName.IsEmpty())
 	{
 		OutError = TEXT("Function name cannot be empty");
@@ -259,11 +271,13 @@ bool FBlueprintEditor::ParsePinType(
 	OutPinType.ResetToDefaults();
 	FString CleanType = TypeString.TrimStartAndEnd();
 
+	// Handle container types
 	if (ParseContainerType(CleanType, OutPinType, OutError))
 	{
 		return OutError.IsEmpty();
 	}
 
+	// Primitive types
 	if (CleanType == TEXT("bool") || CleanType == TEXT("Boolean"))
 	{
 		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
@@ -312,11 +326,13 @@ bool FBlueprintEditor::ParsePinType(
 		return true;
 	}
 
+	// Struct and object types
 	if (ParseStructType(CleanType, OutPinType, OutError))
 	{
 		return true;
 	}
 
+	// Object references (with * suffix)
 	if (CleanType.EndsWith(TEXT("*")))
 	{
 		FString ClassName = CleanType.LeftChop(1).TrimEnd();
@@ -353,33 +369,35 @@ bool FBlueprintEditor::ParseContainerType(
 	FEdGraphPinType& OutPinType,
 	FString& OutError)
 {
+	// TArray<T>
 	if (TypeString.StartsWith(TEXT("TArray<")) && TypeString.EndsWith(TEXT(">")))
 	{
 		FString InnerType = TypeString.Mid(7, TypeString.Len() - 8);
 		FEdGraphPinType InnerPinType;
 		if (!ParsePinType(InnerType, InnerPinType, OutError))
 		{
-			return true; // Recognized as container; OutError set so caller treats as failure
+			return true; // Error set
 		}
 		OutPinType = InnerPinType;
 		OutPinType.ContainerType = EPinContainerType::Array;
 		return true;
 	}
 
+	// TSet<T>
 	if (TypeString.StartsWith(TEXT("TSet<")) && TypeString.EndsWith(TEXT(">")))
 	{
 		FString InnerType = TypeString.Mid(5, TypeString.Len() - 6);
 		FEdGraphPinType InnerPinType;
 		if (!ParsePinType(InnerType, InnerPinType, OutError))
 		{
-			return true; // Recognized as container; OutError set so caller treats as failure
+			return true; // Error set
 		}
 		OutPinType = InnerPinType;
 		OutPinType.ContainerType = EPinContainerType::Set;
 		return true;
 	}
 
-	return false; // Not a container syntax — caller should try other parsers
+	return false; // Not a container type
 }
 
 bool FBlueprintEditor::ParseStructType(
@@ -387,6 +405,7 @@ bool FBlueprintEditor::ParseStructType(
 	FEdGraphPinType& OutPinType,
 	FString& OutError)
 {
+	// Common struct types with TBaseStructure
 	if (TypeName == TEXT("FVector") || TypeName == TEXT("Vector"))
 	{
 		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
@@ -424,6 +443,7 @@ bool FBlueprintEditor::ParseStructType(
 		return true;
 	}
 
+	// Try finding by name
 	UScriptStruct* Struct = FindObject<UScriptStruct>(nullptr, *TypeName);
 	if (Struct)
 	{
@@ -437,6 +457,7 @@ bool FBlueprintEditor::ParseStructType(
 
 FString FBlueprintEditor::PinTypeToString(const FEdGraphPinType& PinType)
 {
+	// Container prefix/suffix
 	FString Prefix, Suffix;
 	if (PinType.ContainerType == EPinContainerType::Array)
 	{
@@ -449,6 +470,7 @@ FString FBlueprintEditor::PinTypeToString(const FEdGraphPinType& PinType)
 		Suffix = TEXT(">");
 	}
 
+	// Base type name
 	FString TypeName;
 
 	if (PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
@@ -470,15 +492,7 @@ FString FBlueprintEditor::PinTypeToString(const FEdGraphPinType& PinType)
 	}
 	else if (PinType.PinCategory == UEdGraphSchema_K2::PC_Byte)
 	{
-		// FByteProperty with a non-null Enum pointer means a UENUM variable; prefer enum name over "byte"
-		if (UEnum* Enum = Cast<UEnum>(PinType.PinSubCategoryObject.Get()))
-		{
-			TypeName = Enum->GetName();
-		}
-		else
-		{
-			TypeName = TEXT("byte");
-		}
+		TypeName = TEXT("byte");
 	}
 	else if (PinType.PinCategory == UEdGraphSchema_K2::PC_String)
 	{

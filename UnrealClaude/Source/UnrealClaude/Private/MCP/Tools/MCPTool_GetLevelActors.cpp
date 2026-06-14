@@ -11,18 +11,21 @@
 
 FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& Params)
 {
+	// Validate editor context using base class
 	UWorld* World = nullptr;
 	if (auto Error = ValidateEditorContext(World))
 	{
 		return Error.GetValue();
 	}
 
+	// Parse parameters
 	FString ClassFilter;
 	Params->TryGetStringField(TEXT("class_filter"), ClassFilter);
 
 	FString NameFilter;
 	Params->TryGetStringField(TEXT("name_filter"), NameFilter);
 
+	// Validate filter strings (basic length check to prevent abuse)
 	FString ValidationError;
 	if (!ClassFilter.IsEmpty() && !FMCPParamValidator::ValidateStringLength(ClassFilter, TEXT("class_filter"), 256, ValidationError))
 	{
@@ -47,9 +50,10 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 	Params->TryGetNumberField(TEXT("offset"), Offset);
 	if (Offset < 0) Offset = 0;
 
+	// Collect actors
 	TArray<TSharedPtr<FJsonValue>> ActorsArray;
-	int32 MatchIndex = 0;
-	int32 AddedCount = 0;
+	int32 MatchIndex = 0;  // Index among matching actors
+	int32 AddedCount = 0;  // Count of actors added to result
 	int32 TotalMatching = 0;
 
 	for (TActorIterator<AActor> It(World); It; ++It)
@@ -60,11 +64,13 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 			continue;
 		}
 
+		// Skip hidden actors if not requested
 		if (!bIncludeHidden && Actor->IsHidden())
 		{
 			continue;
 		}
 
+		// Apply class filter
 		if (!ClassFilter.IsEmpty())
 		{
 			FString ActorClassName = Actor->GetClass()->GetName();
@@ -74,6 +80,7 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 			}
 		}
 
+		// Apply name filter
 		if (!NameFilter.IsEmpty())
 		{
 			FString ActorName = Actor->GetName();
@@ -87,18 +94,21 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 
 		TotalMatching++;
 
+		// Apply offset - skip until we reach the offset
 		if (MatchIndex < Offset)
 		{
 			MatchIndex++;
 			continue;
 		}
 
+		// Apply limit - stop adding after limit reached
 		if (AddedCount >= Limit)
 		{
 			MatchIndex++;
-			continue; // Keep iterating to compute TotalMatching accurately for pagination metadata
+			continue; // Keep counting total but don't add more
 		}
 
+		// Build actor info using base class helper
 		TSharedPtr<FJsonObject> ActorJson = bBrief
 			? BuildActorInfoJson(Actor)
 			: BuildActorInfoWithTransformJson(Actor);
@@ -107,6 +117,7 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 		{
 			ActorJson->SetBoolField(TEXT("hidden"), Actor->IsHidden());
 
+			// Add tags if any
 			if (Actor->Tags.Num() > 0)
 			{
 				TArray<FString> TagStrings;
@@ -123,6 +134,7 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 		MatchIndex++;
 	}
 
+	// Build result with pagination metadata
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetArrayField(TEXT("actors"), ActorsArray);
 	ResultData->SetNumberField(TEXT("count"), AddedCount);

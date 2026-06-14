@@ -6,77 +6,55 @@
 
 FMCPToolResult FMCPTool_AssetSearch::Execute(const TSharedRef<FJsonObject>& Params)
 {
+	// Get AssetRegistry
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
+	// Extract parameters
 	FString ClassFilter = ExtractOptionalString(Params, TEXT("class_filter"));
 	FString PathFilter = ExtractOptionalString(Params, TEXT("path_filter"), TEXT("/Game/"));
 	FString NamePattern = ExtractOptionalString(Params, TEXT("name_pattern"));
 	int32 Limit = FMath::Clamp(ExtractOptionalNumber<int32>(Params, TEXT("limit"), 25), 1, 1000);
 	int32 Offset = FMath::Max(0, ExtractOptionalNumber<int32>(Params, TEXT("offset"), 0));
 
-	// Accept deprecated aliases so LLMs reaching for the "obvious" names still work,
-	// but warn so the model learns the canonical parameter names.
-	TArray<FString> Warnings;
-	TArray<FString> AliasKeysUsed;
-
-	auto ApplyAlias = [&](const TCHAR* AliasName, const TCHAR* CanonicalName, FString& OutCanonical)
-	{
-		FString AliasValue;
-		if (Params->TryGetStringField(AliasName, AliasValue) && !AliasValue.IsEmpty())
-		{
-			AliasKeysUsed.Add(AliasName);
-			if (OutCanonical.IsEmpty())
-			{
-				OutCanonical = AliasValue;
-			}
-			Warnings.Add(FString::Printf(
-				TEXT("Parameter '%s' is not recognized — use '%s' instead. Treating as alias for this call."),
-				AliasName, CanonicalName));
-		}
-	};
-
-	ApplyAlias(TEXT("asset_type"), TEXT("class_filter"), ClassFilter);
-	ApplyAlias(TEXT("search_term"), TEXT("name_pattern"), NamePattern);
-
-	// Flag any remaining unknown keys (typos, wrong names) so the LLM can self-correct.
-	for (const FString& UnknownKey : CollectUnknownParamKeys(Params, AliasKeysUsed))
-	{
-		Warnings.Add(FString::Printf(
-			TEXT("Unknown parameter '%s' was ignored. Valid parameters: class_filter, path_filter, name_pattern, limit, offset."),
-			*UnknownKey));
-	}
-
+	// Build FARFilter
 	FARFilter Filter;
 	Filter.bRecursivePaths = true;
 	Filter.bRecursiveClasses = true;
 
+	// Apply path filter
 	if (!PathFilter.IsEmpty())
 	{
 		Filter.PackagePaths.Add(FName(*PathFilter));
 	}
 
+	// Apply class filter
 	if (!ClassFilter.IsEmpty())
 	{
-		// Accept both full class paths (/Script/Engine.StaticMesh) and short names (StaticMesh) — resolve via common module prefixes
+		// Try to resolve class path - handle both full paths and short names
 		FString ClassPath = ClassFilter;
 
+		// If it's a short name, try common prefixes
 		if (!ClassPath.StartsWith(TEXT("/")))
 		{
+			// Try /Script/Engine first (common classes like StaticMesh, Blueprint)
 			UClass* FoundClass = FindObject<UClass>(nullptr, *FString::Printf(TEXT("/Script/Engine.%s"), *ClassFilter));
 
 			if (!FoundClass)
 			{
+				// Try /Script/CoreUObject
 				FoundClass = FindObject<UClass>(nullptr, *FString::Printf(TEXT("/Script/CoreUObject.%s"), *ClassFilter));
 			}
 
 			if (!FoundClass)
 			{
+				// Try /Script/Niagara for particle systems
 				FoundClass = FindObject<UClass>(nullptr, *FString::Printf(TEXT("/Script/Niagara.%s"), *ClassFilter));
 			}
 
 			if (!FoundClass)
 			{
+				// Try direct find
 				FoundClass = FindObject<UClass>(nullptr, *ClassFilter);
 			}
 
@@ -86,7 +64,7 @@ FMCPToolResult FMCPTool_AssetSearch::Execute(const TSharedRef<FJsonObject>& Para
 			}
 			else
 			{
-				// Last-resort fallback — registry will return empty if path is bogus, which is the right behavior
+				// Build path manually as fallback
 				ClassPath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassFilter);
 			}
 		}
@@ -94,10 +72,11 @@ FMCPToolResult FMCPTool_AssetSearch::Execute(const TSharedRef<FJsonObject>& Para
 		Filter.ClassPaths.Add(FTopLevelAssetPath(ClassPath));
 	}
 
+	// Query assets
 	TArray<FAssetData> AllAssets;
 	AssetRegistry.GetAssets(Filter, AllAssets);
 
-	// Name pattern is applied post-query because FARFilter has no substring-match field
+	// Apply name pattern filter (post-query, case-insensitive)
 	TArray<FAssetData> FilteredAssets;
 	if (!NamePattern.IsEmpty())
 	{
@@ -114,18 +93,21 @@ FMCPToolResult FMCPTool_AssetSearch::Execute(const TSharedRef<FJsonObject>& Para
 		FilteredAssets = MoveTemp(AllAssets);
 	}
 
+	// Calculate pagination
 	int32 Total = FilteredAssets.Num();
 	int32 StartIndex = FMath::Min(Offset, Total);
 	int32 EndIndex = FMath::Min(StartIndex + Limit, Total);
 	int32 Count = EndIndex - StartIndex;
 	bool bHasMore = EndIndex < Total;
 
+	// Build result array
 	TArray<TSharedPtr<FJsonValue>> AssetsArray;
 	for (int32 i = StartIndex; i < EndIndex; ++i)
 	{
 		AssetsArray.Add(MakeShared<FJsonValueObject>(AssetDataToJson(FilteredAssets[i])));
 	}
 
+	// Build result data
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetArrayField(TEXT("assets"), AssetsArray);
 	ResultData->SetNumberField(TEXT("count"), Count);
@@ -138,6 +120,7 @@ FMCPToolResult FMCPTool_AssetSearch::Execute(const TSharedRef<FJsonObject>& Para
 		ResultData->SetNumberField(TEXT("nextOffset"), EndIndex);
 	}
 
+	// Build message
 	FString Message;
 	if (Total == 0)
 	{
@@ -153,9 +136,7 @@ FMCPToolResult FMCPTool_AssetSearch::Execute(const TSharedRef<FJsonObject>& Para
 			Count, StartIndex + 1, EndIndex, Total);
 	}
 
-	FMCPToolResult Result = FMCPToolResult::Success(Message, ResultData);
-	Result.Warnings = MoveTemp(Warnings);
-	return Result;
+	return FMCPToolResult::Success(Message, ResultData);
 }
 
 TSharedPtr<FJsonObject> FMCPTool_AssetSearch::AssetDataToJson(const FAssetData& AssetData) const

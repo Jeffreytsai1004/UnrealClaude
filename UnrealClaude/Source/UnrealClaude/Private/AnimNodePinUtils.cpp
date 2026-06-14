@@ -8,6 +8,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraphSchema_K2.h"
 
+// Forward declaration for node ID functions
 class FAnimGraphEditor;
 
 UEdGraphPin* FAnimNodePinUtils::FindPinByName(
@@ -106,6 +107,7 @@ UEdGraphPin* FAnimNodePinUtils::FindPinWithFallbacks(
 		}
 	}
 
+	// No pin found - build error message if requested
 	if (OutError)
 	{
 		*OutError = BuildAvailablePinsError(Node, Config.Direction, TEXT("pin"));
@@ -153,6 +155,7 @@ UEdGraphNode* FAnimNodePinUtils::FindResultNode(UEdGraph* Graph)
 
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
+		// Check for all types of result/root nodes
 		if (Node->IsA<UAnimGraphNode_StateResult>() ||
 			Node->IsA<UAnimGraphNode_TransitionResult>() ||
 			Node->IsA<UAnimGraphNode_Root>())
@@ -175,6 +178,7 @@ bool FAnimNodePinUtils::ValidatePinValueType(
 		return false;
 	}
 
+	// Validate based on pin type
 	if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
 	{
 		FString LowerValue = Value.ToLower();
@@ -195,6 +199,7 @@ bool FAnimNodePinUtils::ValidatePinValueType(
 				*Pin->PinName.ToString(), *Value);
 			return false;
 		}
+		// Check for decimal point (integers shouldn't have them)
 		if (Value.Contains(TEXT(".")))
 		{
 			OutError = FString::Printf(TEXT("Pin '%s' expects integer value (no decimals), got: %s"),
@@ -206,6 +211,7 @@ bool FAnimNodePinUtils::ValidatePinValueType(
 	{
 		if (!FCString::Atod(*Value) && Value != TEXT("0") && Value != TEXT("0.0"))
 		{
+			// Additional validation for numeric strings
 			bool bIsValid = true;
 			bool bFoundDot = false;
 			for (TCHAR C : Value)
@@ -257,7 +263,8 @@ bool FAnimNodePinUtils::SetPinDefaultValueWithValidation(
 		return false;
 	}
 
-	// Inline node lookup to avoid circular dependency on FAnimGraphEditor::FindNodeById
+	// Find node - need to use FAnimGraphEditor::FindNodeById
+	// This is implemented via delegate to avoid circular dependency
 	UEdGraphNode* Node = nullptr;
 	for (UEdGraphNode* GraphNode : Graph->Nodes)
 	{
@@ -274,9 +281,11 @@ bool FAnimNodePinUtils::SetPinDefaultValueWithValidation(
 		return false;
 	}
 
+	// Find pin
 	UEdGraphPin* Pin = FindPinByName(Node, PinName, EGPD_Input);
 	if (!Pin)
 	{
+		// List available input pins
 		FString AvailablePins;
 		for (UEdGraphPin* P : Node->Pins)
 		{
@@ -290,11 +299,13 @@ bool FAnimNodePinUtils::SetPinDefaultValueWithValidation(
 		return false;
 	}
 
+	// Validate value type
 	if (!ValidatePinValueType(Pin, Value, OutError))
 	{
 		return false;
 	}
 
+	// Set the default value
 	const UEdGraphSchema* Schema = Graph->GetSchema();
 	if (Schema)
 	{

@@ -7,6 +7,7 @@
 #include "MCPParamValidator.h"
 #include "UnrealClaudeUtils.h"
 
+// Forward declarations
 class UWorld;
 
 /**
@@ -144,41 +145,9 @@ protected:
 		return DefaultValue;
 	}
 
-	/**
-	 * Collect keys present in Params that are not declared in GetInfo().Parameters
-	 * and not in ExtraAllowedKeys. Useful for surfacing "warnings" that help LLMs
-	 * self-correct when they pass wrong parameter names.
-	 *
-	 * @param Params - Incoming JSON parameters
-	 * @param ExtraAllowedKeys - Additional keys to accept (e.g. deprecated aliases)
-	 * @return Array of unknown parameter keys (order matches JSON iteration order)
-	 */
-	TArray<FString> CollectUnknownParamKeys(
-		const TSharedRef<FJsonObject>& Params,
-		const TArray<FString>& ExtraAllowedKeys = TArray<FString>()) const
-	{
-		TSet<FString> Known;
-		for (const FMCPToolParameter& P : GetInfo().Parameters)
-		{
-			Known.Add(P.Name);
-		}
-		for (const FString& Extra : ExtraAllowedKeys)
-		{
-			Known.Add(Extra);
-		}
-
-		TArray<FString> Unknown;
-		for (const auto& Pair : Params->Values)
-		{
-			if (!Known.Contains(Pair.Key))
-			{
-				Unknown.Add(Pair.Key);
-			}
-		}
-		return Unknown;
-	}
-
 	// ===== Transform Extraction Helpers =====
+	// These consolidate vector/rotator/scale extraction from JSON parameters
+	// to eliminate duplicate code across MCP tools
 
 	/**
 	 * Extract a FVector from a nested JSON object parameter
@@ -324,6 +293,7 @@ protected:
 	}
 
 	// ===== Validation Helpers =====
+	// Consolidate common validation patterns to reduce boilerplate
 
 	/**
 	 * Validate a string parameter and return error if invalid
@@ -371,11 +341,13 @@ protected:
 		FString& OutValue,
 		TOptional<FMCPToolResult>& OutError) const
 	{
+		// Step 1: Extract
 		if (!ExtractRequiredString(Params, ParamName, OutValue, OutError))
 		{
 			return false;
 		}
 
+		// Step 2: Validate
 		return ValidateParam(OutValue, ValidatorFunc, OutError);
 	}
 
@@ -408,6 +380,7 @@ protected:
 			return true;  // Missing is OK for optional
 		}
 
+		// Present - must validate
 		if (!ValidateParam(ExtractedValue, ValidatorFunc, OutError))
 		{
 			return false;

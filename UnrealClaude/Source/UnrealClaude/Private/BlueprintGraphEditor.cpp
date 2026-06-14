@@ -15,6 +15,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "HAL/PlatformAtomics.h"
 
+// Static member initialization
 volatile int32 FBlueprintGraphEditor::NodeIdCounter = 0;
 const FString FBlueprintGraphEditor::NodeIdPrefix = TEXT("MCP_ID:");
 
@@ -32,10 +33,10 @@ UEdGraph* FBlueprintGraphEditor::FindGraph(
 		return nullptr;
 	}
 
-	// UE 5.7 uses TObjectPtr for these arrays — auto& preserves the pointer wrapper
+	// Get the appropriate graph array (UE 5.7 uses TObjectPtr)
 	auto& Graphs = bFunctionGraph ? Blueprint->FunctionGraphs : Blueprint->UbergraphPages;
 
-	// Empty name means "use the default graph" (first in the array)
+	// If no name specified, return the first graph (default)
 	if (GraphName.IsEmpty())
 	{
 		if (Graphs.Num() > 0 && Graphs[0])
@@ -46,6 +47,7 @@ UEdGraph* FBlueprintGraphEditor::FindGraph(
 		return nullptr;
 	}
 
+	// Search by name
 	for (UEdGraph* Graph : Graphs)
 	{
 		if (Graph && Graph->GetName() == GraphName)
@@ -54,6 +56,7 @@ UEdGraph* FBlueprintGraphEditor::FindGraph(
 		}
 	}
 
+	// Build list of available graphs for error message
 	TArray<FString> AvailableGraphs;
 	for (UEdGraph* Graph : Graphs)
 	{
@@ -96,6 +99,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateNode(
 	UEdGraphNode* NewNode = nullptr;
 	FString Context;
 
+	// Dispatch to appropriate creation function
 	if (NodeType.Equals(TEXT("CallFunction"), ESearchCase::IgnoreCase))
 	{
 		FString FunctionName = NodeParams.IsValid() ? NodeParams->GetStringField(TEXT("function")) : TEXT("");
@@ -153,9 +157,11 @@ UEdGraphNode* FBlueprintGraphEditor::CreateNode(
 
 	if (NewNode)
 	{
+		// Generate and set node ID
 		OutNodeId = GenerateNodeId(NodeType, Context, Graph);
 		SetNodeId(NewNode, OutNodeId);
 
+		// Mark blueprint as modified
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
 		UE_LOG(LogUnrealClaude, Log, TEXT("Created node '%s' (type: %s) at (%d, %d)"), *OutNodeId, *NodeType, PosX, PosY);
@@ -181,8 +187,10 @@ bool FBlueprintGraphEditor::DeleteNode(UEdGraph* Graph, const FString& NodeId, F
 
 	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
 
-	// Break links before removal so dependent nodes don't end up with dangling pin references
+	// Break all connections first
 	Node->BreakAllNodeLinks();
+
+	// Remove from graph
 	Graph->RemoveNode(Node);
 
 	if (Blueprint)
@@ -209,22 +217,6 @@ UEdGraphNode* FBlueprintGraphEditor::FindNodeById(UEdGraph* Graph, const FString
 		}
 	}
 
-	// Fallback: match against the node's native NodeGuid so pre-existing nodes
-	// (created by the user or Engine, not by MCP) are also reachable by ID.
-	// blueprint_query returns node_guid values for every node — this lets modify
-	// ops (delete_node, connect_nodes, set_pin_default) accept the same IDs.
-	FGuid ParsedGuid;
-	if (FGuid::Parse(NodeId, ParsedGuid))
-	{
-		for (UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (Node && Node->NodeGuid == ParsedGuid)
-			{
-				return Node;
-			}
-		}
-	}
-
 	return nullptr;
 }
 
@@ -244,6 +236,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 		return false;
 	}
 
+	// Find source node by MCP-generated ID
 	UEdGraphNode* SourceNode = FindNodeById(Graph, SourceNodeId);
 	if (!SourceNode)
 	{
@@ -251,6 +244,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 		return false;
 	}
 
+	// Find target node
 	UEdGraphNode* TargetNode = FindNodeById(Graph, TargetNodeId);
 	if (!TargetNode)
 	{
@@ -258,12 +252,13 @@ bool FBlueprintGraphEditor::ConnectPins(
 		return false;
 	}
 
-	// Empty pin names trigger exec-pin auto-detection so callers can wire exec flow without naming pins
+	// Find pins - auto-detect exec pins if names are empty
 	UEdGraphPin* SourcePin = nullptr;
 	UEdGraphPin* TargetPin = nullptr;
 
 	if (SourcePinName.IsEmpty())
 	{
+		// Auto-select first exec output
 		SourcePin = GetExecPin(SourceNode, true);
 		if (!SourcePin)
 		{
@@ -276,7 +271,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 		SourcePin = FindPinByName(SourceNode, SourcePinName, EGPD_Output);
 		if (!SourcePin)
 		{
-			// Fall back to input direction for bidirectional data pins
+			// Try input direction for bidirectional data pins
 			SourcePin = FindPinByName(SourceNode, SourcePinName, EGPD_Input);
 		}
 		if (!SourcePin)
@@ -288,6 +283,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 
 	if (TargetPinName.IsEmpty())
 	{
+		// Auto-select first exec input
 		TargetPin = GetExecPin(TargetNode, false);
 		if (!TargetPin)
 		{
@@ -300,7 +296,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 		TargetPin = FindPinByName(TargetNode, TargetPinName, EGPD_Input);
 		if (!TargetPin)
 		{
-			// Fall back to output direction for bidirectional data pins
+			// Try output direction for bidirectional data pins
 			TargetPin = FindPinByName(TargetNode, TargetPinName, EGPD_Output);
 		}
 		if (!TargetPin)
@@ -310,6 +306,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 		}
 	}
 
+	// Check if connection is valid
 	const UEdGraphSchema* Schema = Graph->GetSchema();
 	if (Schema)
 	{
@@ -321,6 +318,7 @@ bool FBlueprintGraphEditor::ConnectPins(
 		}
 	}
 
+	// Make the connection
 	SourcePin->MakeLinkTo(TargetPin);
 
 	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
@@ -350,6 +348,7 @@ bool FBlueprintGraphEditor::DisconnectPins(
 		return false;
 	}
 
+	// Find nodes
 	UEdGraphNode* SourceNode = FindNodeById(Graph, SourceNodeId);
 	if (!SourceNode)
 	{
@@ -364,6 +363,7 @@ bool FBlueprintGraphEditor::DisconnectPins(
 		return false;
 	}
 
+	// Find pins
 	UEdGraphPin* SourcePin = FindPinByName(SourceNode, SourcePinName, EGPD_MAX);
 	if (!SourcePin)
 	{
@@ -378,6 +378,7 @@ bool FBlueprintGraphEditor::DisconnectPins(
 		return false;
 	}
 
+	// Break the link
 	SourcePin->BreakLinkTo(TargetPin);
 
 	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
@@ -420,6 +421,7 @@ bool FBlueprintGraphEditor::SetPinDefaultValue(
 		return false;
 	}
 
+	// Set the default value
 	const UEdGraphSchema* Schema = Graph->GetSchema();
 	if (Schema)
 	{
@@ -500,6 +502,7 @@ TSharedPtr<FJsonObject> FBlueprintGraphEditor::SerializeNodeInfo(UEdGraphNode* N
 	NodeObj->SetNumberField(TEXT("pos_x"), Node->NodePosX);
 	NodeObj->SetNumberField(TEXT("pos_y"), Node->NodePosY);
 
+	// Serialize pins
 	TArray<TSharedPtr<FJsonValue>> Pins;
 	for (UEdGraphPin* Pin : Node->Pins)
 	{
@@ -509,6 +512,7 @@ TSharedPtr<FJsonObject> FBlueprintGraphEditor::SerializeNodeInfo(UEdGraphNode* N
 			PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
 			PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
 
+			// Convert pin type to string representation
 			FString TypeStr;
 			if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
 			{
@@ -577,10 +581,11 @@ FString FBlueprintGraphEditor::GenerateNodeId(const FString& NodeType, const FSt
 		BaseId = FString::Printf(TEXT("%s_%s"), *NodeType, *Context);
 	}
 
-	// Atomic increment makes IDs unique across concurrent MCP tool calls
+	// Ensure uniqueness with atomic increment for thread safety
 	int32 Counter = FPlatformAtomics::InterlockedIncrement(&NodeIdCounter);
 	FString NodeId = FString::Printf(TEXT("%s_%d"), *BaseId, Counter);
 
+	// Verify uniqueness in graph
 	if (Graph)
 	{
 		while (FindNodeById(Graph, NodeId) != nullptr)
@@ -597,7 +602,7 @@ void FBlueprintGraphEditor::SetNodeId(UEdGraphNode* Node, const FString& NodeId)
 {
 	if (Node)
 	{
-		// Store ID in node comment because it persists with the asset and is visible in the editor
+		// Store ID in node comment (visible in editor, persisted)
 		Node->NodeComment = NodeIdPrefix + NodeId;
 	}
 }
@@ -609,6 +614,7 @@ FString FBlueprintGraphEditor::GetNodeId(UEdGraphNode* Node)
 		return FString();
 	}
 
+	// Extract ID from node comment
 	if (Node->NodeComment.StartsWith(NodeIdPrefix))
 	{
 		return Node->NodeComment.RightChop(NodeIdPrefix.Len());
@@ -633,15 +639,17 @@ UEdGraphNode* FBlueprintGraphEditor::CreateCallFunctionNode(
 		return nullptr;
 	}
 
+	// Find the function
 	UFunction* Function = nullptr;
 	UClass* FunctionOwner = nullptr;
 
+	// Try to find class by name
 	if (!TargetClass.IsEmpty())
 	{
 		FunctionOwner = FindObject<UClass>(nullptr, *TargetClass);
 		if (!FunctionOwner)
 		{
-			// FindObject misses Kismet libraries; resolve by hardcoded name as a fallback
+			// Try common library classes
 			if (TargetClass.Equals(TEXT("KismetSystemLibrary"), ESearchCase::IgnoreCase))
 			{
 				FunctionOwner = UKismetSystemLibrary::StaticClass();
@@ -654,7 +662,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateCallFunctionNode(
 	}
 	else
 	{
-		// Most common functions live in KismetSystemLibrary; pick it as the default search class
+		// Default to KismetSystemLibrary for common functions
 		FunctionOwner = UKismetSystemLibrary::StaticClass();
 	}
 
@@ -663,7 +671,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateCallFunctionNode(
 		Function = FunctionOwner->FindFunctionByName(FName(*FunctionName));
 	}
 
-	// Fall back to scanning the two Kismet libraries when the caller's target_class lookup misses
+	// If not found in specified class, search common libraries
 	if (!Function)
 	{
 		Function = UKismetSystemLibrary::StaticClass()->FindFunctionByName(FName(*FunctionName));
@@ -679,6 +687,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateCallFunctionNode(
 		return nullptr;
 	}
 
+	// Create the node
 	FGraphNodeCreator<UK2Node_CallFunction> NodeCreator(*Graph);
 	UK2Node_CallFunction* CallNode = NodeCreator.CreateNode();
 	CallNode->SetFromFunction(Function);
@@ -724,8 +733,10 @@ UEdGraphNode* FBlueprintGraphEditor::CreateEventNode(
 		return nullptr;
 	}
 
+	// Find the event function
 	UFunction* EventFunc = nullptr;
 
+	// Check common events
 	if (EventName.Equals(TEXT("BeginPlay"), ESearchCase::IgnoreCase))
 	{
 		EventFunc = AActor::StaticClass()->FindFunctionByName(FName("ReceiveBeginPlay"));
@@ -740,6 +751,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateEventNode(
 	}
 	else
 	{
+		// Try to find in parent class
 		if (Blueprint->ParentClass)
 		{
 			EventFunc = Blueprint->ParentClass->FindFunctionByName(FName(*EventName));
@@ -752,6 +764,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateEventNode(
 		return nullptr;
 	}
 
+	// Create the event node
 	FGraphNodeCreator<UK2Node_Event> NodeCreator(*Graph);
 	UK2Node_Event* EventNode = NodeCreator.CreateNode();
 	EventNode->EventReference.SetFromField<UFunction>(EventFunc, false);
@@ -783,6 +796,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateVariableGetNode(
 		return nullptr;
 	}
 
+	// Verify variable exists
 	FName VarName(*VariableName);
 	bool bFound = false;
 	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
@@ -800,6 +814,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateVariableGetNode(
 		return nullptr;
 	}
 
+	// Create the node
 	FGraphNodeCreator<UK2Node_VariableGet> NodeCreator(*Graph);
 	UK2Node_VariableGet* GetNode = NodeCreator.CreateNode();
 	GetNode->VariableReference.SetSelfMember(VarName);
@@ -830,6 +845,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateVariableSetNode(
 		return nullptr;
 	}
 
+	// Verify variable exists
 	FName VarName(*VariableName);
 	bool bFound = false;
 	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
@@ -847,6 +863,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateVariableSetNode(
 		return nullptr;
 	}
 
+	// Create the node
 	FGraphNodeCreator<UK2Node_VariableSet> NodeCreator(*Graph);
 	UK2Node_VariableSet* SetNode = NodeCreator.CreateNode();
 	SetNode->VariableReference.SetSelfMember(VarName);
@@ -870,6 +887,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateSequenceNode(
 	SeqNode->NodePosY = PosY;
 	NodeCreator.Finalize();
 
+	// Add additional output pins if needed (default is 2)
 	while (SeqNode->Pins.Num() < NumOutputs + 1) // +1 for input exec
 	{
 		SeqNode->AddInputPin();
@@ -885,6 +903,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateMathNode(
 	int32 PosY,
 	FString& OutError)
 {
+	// Find the appropriate math function
 	FName FunctionName;
 	if (MathOp.Equals(TEXT("Add"), ESearchCase::IgnoreCase))
 	{
@@ -915,6 +934,7 @@ UEdGraphNode* FBlueprintGraphEditor::CreateMathNode(
 		return nullptr;
 	}
 
+	// Create a call function node for the math operation
 	FGraphNodeCreator<UK2Node_CallFunction> NodeCreator(*Graph);
 	UK2Node_CallFunction* MathNode = NodeCreator.CreateNode();
 	MathNode->SetFromFunction(MathFunc);

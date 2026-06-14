@@ -21,7 +21,7 @@ TOptional<FMCPToolResult> FMCPToolBase::ValidateEditorContext(UWorld*& OutWorld)
 		return FMCPToolResult::Error(TEXT("No active world"));
 	}
 
-	return TOptional<FMCPToolResult>();
+	return TOptional<FMCPToolResult>(); // Success - no error
 }
 
 AActor* FMCPToolBase::FindActorByNameOrLabel(UWorld* World, const FString& NameOrLabel) const

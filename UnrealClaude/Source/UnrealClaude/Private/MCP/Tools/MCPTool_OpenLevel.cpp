@@ -24,7 +24,7 @@ static double WaitForLevelStreaming()
 	constexpr double MaxWaitSeconds = 30.0;
 	constexpr int32 RequiredStableChecks = 3;
 
-	// Phase 1: drain async package loads — must complete before polling streaming
+	// Phase 1: Wait for all async package loading to complete
 	FlushAsyncLoading();
 
 	if (IStreamingManager::HasShutdown())
@@ -32,13 +32,13 @@ static double WaitForLevelStreaming()
 		return FPlatformTime::Seconds() - StartTime;
 	}
 
-	// Phase 2: poll until streaming has been stable for RequiredStableChecks iterations (avoids returning during a brief lull)
+	// Phase 2: Poll streaming manager until resources settle
 	IStreamingManager& StreamingMgr = IStreamingManager::Get();
 	int32 StableChecks = 0;
 
 	while (FPlatformTime::Seconds() - StartTime < MaxWaitSeconds)
 	{
-		// 100ms batch per iteration keeps the editor responsive without overshooting MaxWaitSeconds
+		// Process a batch of streaming work (up to 100ms per iteration)
 		StreamingMgr.BlockTillAllRequestsFinished(0.1f, false);
 
 		const bool bDoneStreaming = StreamingMgr.GetNumWantingResources() == 0;
@@ -62,6 +62,7 @@ static double WaitForLevelStreaming()
 
 FMCPToolResult FMCPTool_OpenLevel::Execute(const TSharedRef<FJsonObject>& Params)
 {
+	// Extract required action parameter
 	FString Action;
 	TOptional<FMCPToolResult> Error;
 	if (!ExtractRequiredString(Params, TEXT("action"), Action, Error))
@@ -94,6 +95,7 @@ FMCPToolResult FMCPTool_OpenLevel::Execute(const TSharedRef<FJsonObject>& Params
 
 FMCPToolResult FMCPTool_OpenLevel::ExecuteOpen(const TSharedRef<FJsonObject>& Params)
 {
+	// Extract and validate level path
 	FString LevelPath;
 	TOptional<FMCPToolResult> Error;
 	if (!ExtractRequiredString(Params, TEXT("level_path"), LevelPath, Error))
@@ -107,9 +109,11 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteOpen(const TSharedRef<FJsonObject>& Pa
 		return FMCPToolResult::Error(ValidationError);
 	}
 
+	// Verify the asset exists before attempting to load
 	FString PackagePath = LevelPath;
 	if (!PackagePath.EndsWith(TEXT(".umap")))
 	{
+		// Try to find the package
 		if (!FPackageName::DoesPackageExist(PackagePath))
 		{
 			return FMCPToolResult::Error(FString::Printf(
@@ -117,6 +121,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteOpen(const TSharedRef<FJsonObject>& Pa
 		}
 	}
 
+	// Resolve to filename for LoadMap
 	FString Filename;
 	if (!FPackageName::TryConvertLongPackageNameToFilename(PackagePath, Filename, FPackageName::GetMapPackageExtension()))
 	{
@@ -124,7 +129,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteOpen(const TSharedRef<FJsonObject>& Pa
 			TEXT("Could not resolve level path: '%s'"), *LevelPath));
 	}
 
-	// LoadMap internally prompts the user to save the current world if dirty
+	// Load the map (engine handles save prompt internally)
 	UWorld* LoadedWorld = UEditorLoadingAndSavingUtils::LoadMap(Filename);
 
 	if (!LoadedWorld)
@@ -133,9 +138,10 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteOpen(const TSharedRef<FJsonObject>& Pa
 			TEXT("Failed to load level: '%s'"), *LevelPath));
 	}
 
-	// Block until streaming settles — prevents follow-up tool calls from racing on LevelRenderAssetManagersLock
+	// Wait for async loading and streaming to settle before returning
 	const double WaitTime = WaitForLevelStreaming();
 
+	// Build result
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("action"), TEXT("open"));
 	ResultData->SetStringField(TEXT("levelPath"), LevelPath);
@@ -154,6 +160,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteNew(const TSharedRef<FJsonObject>& Par
 
 	if (TemplateName.IsEmpty())
 	{
+		// Create a new blank map
 		UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(bSaveCurrent);
 
 		if (!NewWorld)
@@ -170,6 +177,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteNew(const TSharedRef<FJsonObject>& Par
 			FString::Printf(TEXT("Created new blank map: %s"), *NewWorld->GetMapName()), ResultData);
 	}
 
+	// Create from template - find matching template
 	if (!GUnrealEd)
 	{
 		return FMCPToolResult::Error(TEXT("Editor engine not available."));
@@ -181,6 +189,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteNew(const TSharedRef<FJsonObject>& Par
 	const FTemplateMapInfo* FoundTemplate = nullptr;
 	for (const FTemplateMapInfo& Template : Templates)
 	{
+		// Match by display name or map package path
 		FString DisplayName = FPaths::GetBaseFilename(Template.Map.ToString());
 		if (DisplayName.ToLower() == TemplateNameLower ||
 			Template.Map.ToString().ToLower().Contains(TemplateNameLower))
@@ -197,6 +206,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteNew(const TSharedRef<FJsonObject>& Par
 			*TemplateName));
 	}
 
+	// Load the template map
 	FString TemplateFilename;
 	FString TemplatePackageName = FoundTemplate->Map.ToString();
 	if (!FPackageName::TryConvertLongPackageNameToFilename(TemplatePackageName, TemplateFilename, FPackageName::GetMapPackageExtension()))
@@ -213,6 +223,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteNew(const TSharedRef<FJsonObject>& Par
 			TEXT("Failed to create map from template: '%s'"), *TemplateName));
 	}
 
+	// Wait for async loading and streaming to settle before returning
 	const double WaitTime = WaitForLevelStreaming();
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
@@ -241,6 +252,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteSaveAs(const TSharedRef<FJsonObject>& 
 		return FMCPToolResult::Error(ValidationError);
 	}
 
+	// Get current world
 	if (!GEditor)
 	{
 		return FMCPToolResult::Error(TEXT("Editor not available"));
@@ -251,8 +263,10 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteSaveAs(const TSharedRef<FJsonObject>& 
 		return FMCPToolResult::Error(TEXT("No world currently loaded"));
 	}
 
+	// Convert package path to filename
 	FString Filename = FPackageName::LongPackageNameToFilename(SavePath, FPackageName::GetMapPackageExtension());
 
+	// Save the map
 	bool bSaved = FEditorFileUtils::SaveMap(World, Filename);
 	if (!bSaved)
 	{
@@ -260,6 +274,7 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteSaveAs(const TSharedRef<FJsonObject>& 
 			TEXT("Failed to save level to: '%s'"), *SavePath));
 	}
 
+	// Build result
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("action"), TEXT("save_as"));
 	ResultData->SetStringField(TEXT("save_path"), SavePath);
@@ -315,18 +330,21 @@ bool FMCPTool_OpenLevel::ValidateLevelPath(const FString& Path, FString& OutErro
 		return false;
 	}
 
+	// Block engine levels
 	if (Path.StartsWith(TEXT("/Engine/")) || Path.StartsWith(TEXT("/Script/")))
 	{
 		OutError = TEXT("Cannot open engine or script levels");
 		return false;
 	}
 
+	// Block path traversal
 	if (Path.Contains(TEXT("..")))
 	{
 		OutError = TEXT("Level path cannot contain path traversal sequences");
 		return false;
 	}
 
+	// Check for dangerous characters
 	using namespace UnrealClaudeConstants::MCPValidation;
 	int32 FoundIndex;
 	for (const TCHAR* c = DangerousChars; *c; ++c)
@@ -338,6 +356,7 @@ bool FMCPTool_OpenLevel::ValidateLevelPath(const FString& Path, FString& OutErro
 		}
 	}
 
+	// Must start with /Game/ for user content
 	if (!Path.StartsWith(TEXT("/Game/")))
 	{
 		OutError = TEXT("Level path must start with '/Game/' to reference project content");

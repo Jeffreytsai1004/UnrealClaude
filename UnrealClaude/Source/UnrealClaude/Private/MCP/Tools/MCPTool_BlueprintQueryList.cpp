@@ -11,22 +11,27 @@
 
 FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject>& Params)
 {
+	// Extract filters
 	FString PathFilter = ExtractOptionalString(Params, TEXT("path_filter"), TEXT("/Game/"));
 	FString TypeFilter = ExtractOptionalString(Params, TEXT("type_filter"));
 	FString NameFilter = ExtractOptionalString(Params, TEXT("name_filter"));
 	int32 Limit = ExtractOptionalNumber<int32>(Params, TEXT("limit"), 25);
 
+	// Clamp limit
 	Limit = FMath::Clamp(Limit, 1, 1000);
 
+	// Validate path filter
 	FString ValidationError;
 	if (!PathFilter.IsEmpty() && !FMCPParamValidator::ValidateBlueprintPath(PathFilter, ValidationError))
 	{
 		return FMCPToolResult::Error(ValidationError);
 	}
 
+	// Query AssetRegistry
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
+	// Build filter
 	FARFilter Filter;
 	Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
 	Filter.bRecursivePaths = true;
@@ -37,15 +42,18 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 		Filter.PackagePaths.Add(FName(*PathFilter));
 	}
 
+	// Get assets
 	TArray<FAssetData> AssetDataList;
 	AssetRegistry.GetAssets(Filter, AssetDataList);
 
+	// Process results
 	TArray<TSharedPtr<FJsonValue>> ResultsArray;
 	int32 Count = 0;
 	int32 TotalMatching = 0;
 
 	for (const FAssetData& AssetData : AssetDataList)
 	{
+		// Get parent class name for filtering
 		FString ParentClassName;
 		FAssetDataTagMapSharedView::FFindTagResult ParentClassTag = AssetData.TagsAndValues.FindTag(FName("ParentClass"));
 		if (ParentClassTag.IsSet())
@@ -53,6 +61,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 			ParentClassName = ParentClassTag.GetValue();
 		}
 
+		// Apply type filter
 		if (!TypeFilter.IsEmpty())
 		{
 			if (!ParentClassName.Contains(TypeFilter, ESearchCase::IgnoreCase))
@@ -61,6 +70,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 			}
 		}
 
+		// Apply name filter
 		if (!NameFilter.IsEmpty())
 		{
 			if (!AssetData.AssetName.ToString().Contains(NameFilter, ESearchCase::IgnoreCase))
@@ -71,11 +81,13 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 
 		TotalMatching++;
 
+		// Check limit
 		if (Count >= Limit)
 		{
 			continue;
 		}
 
+		// Get Blueprint type
 		FString BlueprintType = TEXT("Normal");
 		FAssetDataTagMapSharedView::FFindTagResult TypeTag = AssetData.TagsAndValues.FindTag(FName("BlueprintType"));
 		if (TypeTag.IsSet())
@@ -83,11 +95,13 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 			BlueprintType = TypeTag.GetValue();
 		}
 
+		// Build result object
 		TSharedPtr<FJsonObject> BPJson = MakeShared<FJsonObject>();
 		BPJson->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
 		BPJson->SetStringField(TEXT("path"), AssetData.GetObjectPathString());
 		BPJson->SetStringField(TEXT("blueprint_type"), BlueprintType);
 
+		// Clean up parent class name (remove prefix)
 		if (!ParentClassName.IsEmpty())
 		{
 			FString CleanParentName = ParentClassName;
@@ -96,7 +110,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 			{
 				CleanParentName = CleanParentName.Mid(LastDotIndex + 1);
 			}
-			// Strip "_C" so callers see the source class name (Actor) instead of the generated class (Actor_C)
+			// Remove trailing '_C' from generated class names
 			if (CleanParentName.EndsWith(TEXT("_C")))
 			{
 				CleanParentName = CleanParentName.LeftChop(2);
@@ -108,6 +122,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 		Count++;
 	}
 
+	// Build response
 	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
 	ResponseData->SetArrayField(TEXT("blueprints"), ResultsArray);
 	ResponseData->SetNumberField(TEXT("count"), Count);
@@ -126,6 +141,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 
 FMCPToolResult FMCPTool_BlueprintQuery::ExecuteInspect(const TSharedRef<FJsonObject>& Params)
 {
+	// Get Blueprint path
 	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
 	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
@@ -133,12 +149,14 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteInspect(const TSharedRef<FJsonObj
 		return Error.GetValue();
 	}
 
+	// Validate path
 	FString ValidationError;
 	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
 	{
 		return FMCPToolResult::Error(ValidationError);
 	}
 
+	// Load Blueprint
 	FString LoadError;
 	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
 	if (!Blueprint)
@@ -146,10 +164,12 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteInspect(const TSharedRef<FJsonObj
 		return FMCPToolResult::Error(LoadError);
 	}
 
+	// Get options
 	bool bIncludeVariables = ExtractOptionalBool(Params, TEXT("include_variables"), false);
 	bool bIncludeFunctions = ExtractOptionalBool(Params, TEXT("include_functions"), false);
 	bool bIncludeGraphs = ExtractOptionalBool(Params, TEXT("include_graphs"), false);
 
+	// Serialize Blueprint info
 	TSharedPtr<FJsonObject> BlueprintInfo = FBlueprintUtils::SerializeBlueprintInfo(
 		Blueprint,
 		bIncludeVariables,
@@ -165,6 +185,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteInspect(const TSharedRef<FJsonObj
 
 FMCPToolResult FMCPTool_BlueprintQuery::ExecuteGetGraph(const TSharedRef<FJsonObject>& Params)
 {
+	// Get Blueprint path
 	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
 	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
@@ -172,12 +193,14 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteGetGraph(const TSharedRef<FJsonOb
 		return Error.GetValue();
 	}
 
+	// Validate path
 	FString ValidationError;
 	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
 	{
 		return FMCPToolResult::Error(ValidationError);
 	}
 
+	// Load Blueprint
 	FString LoadError;
 	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
 	if (!Blueprint)
@@ -185,8 +208,10 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteGetGraph(const TSharedRef<FJsonOb
 		return FMCPToolResult::Error(LoadError);
 	}
 
+	// Get graph info
 	TSharedPtr<FJsonObject> GraphInfo = FBlueprintUtils::GetGraphInfo(Blueprint);
 
+	// Add Blueprint name for context
 	GraphInfo->SetStringField(TEXT("blueprint_name"), Blueprint->GetName());
 	GraphInfo->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
 

@@ -39,8 +39,6 @@ public class UnrealClaude : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				// Project Settings -> Plugins -> Unreal Claude (UUnrealClaudeSettings)
-				"DeveloperSettings",
 				"Json",
 				"JsonUtilities",
 				"HTTP",

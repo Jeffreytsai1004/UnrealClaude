@@ -30,10 +30,12 @@ bool FClipboardImageUtils::ClipboardHasImage()
 #if PLATFORM_WINDOWS
 	return ::IsClipboardFormatAvailable(CF_DIB) != 0;
 #elif PLATFORM_LINUX
-	// Route through /bin/sh so PATH is resolved (wl-paste/xclip may not live in /usr/bin)
+	// Check if wl-paste or xclip can provide image data
+	// Route through /bin/sh so PATH is resolved (binaries may not be in /usr/bin)
 	int32 ReturnCode = -1;
 	FString StdOut, StdErr;
 
+	// Try wl-paste first (Wayland)
 	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), TEXT("-c 'wl-paste --list-types 2>/dev/null'"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
 	{
 		if (StdOut.Contains(TEXT("image/png")) || StdOut.Contains(TEXT("image/")))
@@ -42,7 +44,7 @@ bool FClipboardImageUtils::ClipboardHasImage()
 		}
 	}
 
-	// X11 fallback if Wayland wl-paste didn't report image data
+	// Try xclip (X11)
 	StdOut.Empty();
 	StdErr.Empty();
 	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), TEXT("-c 'xclip -selection clipboard -t TARGETS -o 2>/dev/null'"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
@@ -55,6 +57,7 @@ bool FClipboardImageUtils::ClipboardHasImage()
 
 	return false;
 #elif PLATFORM_MAC
+	// Check if clipboard contains image data using osascript
 	int32 ReturnCode = -1;
 	FString StdOut, StdErr;
 
@@ -100,12 +103,14 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		return false;
 	}
 
+	// Parse BITMAPINFOHEADER
 	const BITMAPINFOHEADER* Header = static_cast<const BITMAPINFOHEADER*>(LockedData);
 	const int32 Width = Header->biWidth;
 	const int32 Height = FMath::Abs(Header->biHeight);
 	const int32 BitCount = Header->biBitCount;
 	const bool bTopDown = (Header->biHeight < 0);
 
+	// Validate dimensions and bit depth
 	constexpr int32 MaxReasonableDimension = 16384;
 	if (Width <= 0 || Height <= 0 || (BitCount != 24 && BitCount != 32))
 	{
@@ -123,6 +128,7 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		return false;
 	}
 
+	// Validate compression type
 	if (Header->biCompression != BI_RGB && !(Header->biCompression == BI_BITFIELDS && BitCount == 32))
 	{
 		UE_LOG(LogUnrealClaude, Warning, TEXT("Unsupported clipboard DIB compression type: %d"), Header->biCompression);
@@ -142,12 +148,13 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 	const int32 SrcBytesPerPixel = BitCount / 8;
 	const int32 SrcRowStride = ((Width * SrcBytesPerPixel + 3) / 4) * 4;
 
+	// Convert to BGRA pixel array
 	TArray<FColor> Pixels;
 	Pixels.SetNum(Width * Height);
 
 	for (int32 Y = 0; Y < Height; ++Y)
 	{
-		// DIB is bottom-up by default; flip when biHeight is positive
+		// DIB is bottom-up by default, flip unless top-down
 		const int32 SrcRow = bTopDown ? Y : (Height - 1 - Y);
 		const uint8* RowPtr = PixelData + SrcRow * SrcRowStride;
 
@@ -165,6 +172,7 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 	::GlobalUnlock(hData);
 	::CloseClipboard();
 
+	// Compress to PNG using IImageWrapperModule
 	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
 	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
 
@@ -187,8 +195,10 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		return false;
 	}
 
+	// Ensure directory exists
 	IFileManager::Get().MakeDirectory(*SaveDirectory, true);
 
+	// Generate filename with timestamp
 	FDateTime Now = FDateTime::Now();
 	FString FileName = FString::Printf(TEXT("clipboard_%04d%02d%02d_%02d%02d%02d.png"),
 		Now.GetYear(), Now.GetMonth(), Now.GetDay(),
@@ -207,9 +217,12 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 	return true;
 
 #elif PLATFORM_LINUX
-	// Use wl-paste (Wayland) or xclip (X11) to get clipboard image as PNG
+	// On Linux, use wl-paste (Wayland) or xclip (X11) to get clipboard image as PNG
+
+	// Ensure directory exists
 	IFileManager::Get().MakeDirectory(*SaveDirectory, true);
 
+	// Generate filename with timestamp
 	FDateTime Now = FDateTime::Now();
 	FString FileName = FString::Printf(TEXT("clipboard_%04d%02d%02d_%02d%02d%02d.png"),
 		Now.GetYear(), Now.GetMonth(), Now.GetDay(),
@@ -233,6 +246,7 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		}
 	}
 
+	// Try xclip (X11)
 	StdOut.Empty();
 	StdErr.Empty();
 	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), *FString::Printf(TEXT("-c 'xclip -selection clipboard -t image/png -o > \"%s\"'"), *OutFilePath),
@@ -246,6 +260,7 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		}
 	}
 
+	// Clean up empty/failed file
 	if (IFileManager::Get().FileExists(*OutFilePath))
 	{
 		IFileManager::Get().Delete(*OutFilePath);
@@ -263,8 +278,10 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 	// that UE resolves internally, but external processes need the full POSIX path
 	FString AbsSaveDirectory = FPaths::ConvertRelativePathToFull(SaveDirectory);
 
+	// Ensure directory exists
 	IFileManager::Get().MakeDirectory(*AbsSaveDirectory, true);
 
+	// Generate filename with timestamp
 	FDateTime Now = FDateTime::Now();
 	FString FileName = FString::Printf(TEXT("clipboard_%04d%02d%02d_%02d%02d%02d.png"),
 		Now.GetYear(), Now.GetMonth(), Now.GetDay(),
@@ -312,6 +329,7 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		IFileManager::Get().Delete(*ScriptPath);
 	}
 
+	// Clean up empty/failed file
 	if (IFileManager::Get().FileExists(*OutFilePath))
 	{
 		IFileManager::Get().Delete(*OutFilePath);

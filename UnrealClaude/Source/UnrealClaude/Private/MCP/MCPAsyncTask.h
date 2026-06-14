@@ -126,6 +126,7 @@ struct FMCPAsyncTask
 		{
 			Json->SetStringField(TEXT("completed_at"), CompletedTime.ToIso8601());
 
+			// Calculate duration
 			FTimespan Duration = CompletedTime - StartedTime;
 			Json->SetNumberField(TEXT("duration_ms"), Duration.GetTotalMilliseconds());
 
@@ -136,15 +137,6 @@ struct FMCPAsyncTask
 				if (Result.Data.IsValid())
 				{
 					Json->SetObjectField(TEXT("data"), Result.Data);
-				}
-				if (Result.Warnings.Num() > 0)
-				{
-					TArray<TSharedPtr<FJsonValue>> WarningsJson;
-					for (const FString& Warning : Result.Warnings)
-					{
-						WarningsJson.Add(MakeShared<FJsonValueString>(Warning));
-					}
-					Json->SetArrayField(TEXT("warnings"), WarningsJson);
 				}
 			}
 		}

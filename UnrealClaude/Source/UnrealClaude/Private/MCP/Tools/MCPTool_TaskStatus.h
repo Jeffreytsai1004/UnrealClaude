@@ -50,6 +50,7 @@ public:
 			return FMCPToolResult::Error(TEXT("Task queue not initialized"));
 		}
 
+		// Extract task ID
 		FString TaskIdString;
 		TOptional<FMCPToolResult> Error;
 		if (!ExtractRequiredString(Params, TEXT("task_id"), TaskIdString, Error))
@@ -57,12 +58,14 @@ public:
 			return Error.GetValue();
 		}
 
+		// Parse GUID
 		FGuid TaskId;
 		if (!FGuid::Parse(TaskIdString, TaskId))
 		{
 			return FMCPToolResult::Error(TEXT("Invalid task_id format"));
 		}
 
+		// Get task
 		TSharedPtr<FMCPAsyncTask> Task = TaskQueue->GetTask(TaskId);
 		if (!Task.IsValid())
 		{
@@ -70,8 +73,8 @@ public:
 				FString::Printf(TEXT("Task not found: %s"), *TaskIdString));
 		}
 
-		// Pass false to omit full result payload — callers should use task_result for that
-		TSharedPtr<FJsonObject> ResultData = Task->ToJson(false);
+		// Build response
+		TSharedPtr<FJsonObject> ResultData = Task->ToJson(false); // Don't include full result
 
 		FString StatusStr = FMCPAsyncTask::StatusToString(Task->Status.Load());
 		return FMCPToolResult::Success(

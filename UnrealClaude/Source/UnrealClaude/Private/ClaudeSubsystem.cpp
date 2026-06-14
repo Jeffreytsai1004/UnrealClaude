@@ -8,7 +8,7 @@
 #include "UnrealClaudeModule.h"
 #include "UnrealClaudeConstants.h"
 
-// Static cache avoids re-allocating this multi-KB prompt on every SendPrompt call
+// Cached system prompt - static to avoid recreation on each call
 static const FString CachedUE57SystemPrompt = TEXT(R"(You are an expert Unreal Engine 5.7 developer assistant integrated directly into the UE Editor.
 
 CONTEXT:
@@ -79,7 +79,8 @@ FClaudeCodeSubsystem::FClaudeCodeSubsystem()
 
 FClaudeCodeSubsystem::~FClaudeCodeSubsystem()
 {
-	// Defined out-of-line so TUniquePtr sees the full type of Runner/SessionManager for destruction
+	// Destructor defined here where full types are available
+	// TUniquePtr will properly destroy the objects
 }
 
 IClaudeRunner* FClaudeCodeSubsystem::GetRunner() const
@@ -94,6 +95,7 @@ void FClaudeCodeSubsystem::SendPrompt(
 {
 	FClaudeRequestConfig Config;
 
+	// Build prompt with conversation history context
 	Config.Prompt = BuildPromptWithHistory(Prompt);
 	Config.WorkingDirectory = FPaths::ProjectDir();
 	Config.bSkipPermissions = true;
@@ -116,9 +118,10 @@ void FClaudeCodeSubsystem::SendPrompt(
 		Config.SystemPrompt += TEXT("\n\n") + CustomSystemPrompt;
 	}
 
+	// Pass structured event delegate through to runner config
 	Config.OnStreamEvent = Options.OnStreamEvent;
 
-	// Wrap the user's completion callback so we can persist the exchange before forwarding it
+	// Wrap completion to store history and save session
 	FOnClaudeResponse WrappedComplete;
 	WrappedComplete.BindLambda([this, Prompt, OnComplete](const FString& Response, bool bSuccess)
 	{
@@ -140,6 +143,7 @@ void FClaudeCodeSubsystem::SendPrompt(
 	FOnClaudeProgress OnProgress,
 	bool bIncludeProjectContext)
 {
+	// Legacy API - delegate to new API
 	FClaudePromptOptions Options;
 	Options.bIncludeEngineContext = bIncludeUE57Context;
 	Options.bIncludeProjectContext = bIncludeProjectContext;
@@ -149,6 +153,7 @@ void FClaudeCodeSubsystem::SendPrompt(
 
 FString FClaudeCodeSubsystem::GetUE57SystemPrompt() const
 {
+	// Return cached static prompt to avoid string recreation
 	return CachedUE57SystemPrompt;
 }
 
@@ -156,6 +161,7 @@ FString FClaudeCodeSubsystem::GetProjectContextPrompt() const
 {
 	FString Context = FProjectContextManager::Get().FormatContextForPrompt();
 
+	// Add script execution history (last 10 scripts)
 	FString ScriptHistory = FScriptExecutionManager::Get().FormatHistoryForContext(10);
 	if (!ScriptHistory.IsEmpty())
 	{
@@ -256,7 +262,7 @@ FString FClaudeCodeSubsystem::BuildPromptWithHistory(const FString& NewPrompt) c
 
 	FString PromptWithHistory;
 
-	// Cap history window at MaxHistoryInPrompt to keep token budget bounded
+	// Include recent history (limit to last N exchanges)
 	int32 StartIndex = FMath::Max(0, History.Num() - UnrealClaudeConstants::Session::MaxHistoryInPrompt);
 
 	for (int32 i = StartIndex; i < History.Num(); ++i)

@@ -10,7 +10,6 @@
 #include "MCP/MCPToolRegistry.h"
 #include "Widgets/SClaudeToolbar.h"
 #include "Widgets/SClaudeInputArea.h"
-#include "Widgets/SMarkdownWidget.h"
 
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -31,89 +30,6 @@
 #define LOCTEXT_NAMESPACE "UnrealClaude"
 
 // ============================================================================
-// SRightClickDragBox
-// ============================================================================
-
-void SRightClickDragBox::Construct(const FArguments& InArgs)
-{
-	TargetScrollBox = InArgs._ScrollBox;
-
-	ChildSlot
-	[
-		InArgs._Content.Widget
-	];
-}
-
-FReply SRightClickDragBox::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
-	{
-		bIsDragging = true;
-		DragStartMousePos = MouseEvent.GetScreenSpacePosition();
-
-		if (TargetScrollBox.IsValid())
-		{
-			DragStartScrollOffset = TargetScrollBox->GetScrollOffset();
-		}
-
-		return FReply::Handled().CaptureMouse(SharedThis(this));
-	}
-
-	return FReply::Unhandled();
-}
-
-FReply SRightClickDragBox::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bIsDragging)
-	{
-		bIsDragging = false;
-		return FReply::Handled().ReleaseMouseCapture();
-	}
-
-	return FReply::Unhandled();
-}
-
-FReply SRightClickDragBox::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (bIsDragging && TargetScrollBox.IsValid())
-	{
-		FVector2D CurrentMousePos = MouseEvent.GetScreenSpacePosition();
-		float DeltaY = DragStartMousePos.Y - CurrentMousePos.Y;
-
-		// Apply delta to scroll offset (moving mouse up scrolls content down, moving down scrolls content up)
-		float NewScrollOffset = DragStartScrollOffset + DeltaY;
-		TargetScrollBox->SetScrollOffset(NewScrollOffset);
-
-		return FReply::Handled();
-	}
-
-	return FReply::Unhandled();
-}
-
-TOptional<EMouseCursor::Type> SRightClickDragBox::GetCursor() const
-{
-	if (bIsDragging)
-	{
-		return EMouseCursor::GrabHandClosed;
-	}
-	return TOptional<EMouseCursor::Type>();
-}
-
-FReply SRightClickDragBox::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (TargetScrollBox.IsValid())
-	{
-		float CurrentOffset = TargetScrollBox->GetScrollOffset();
-		float WheelDelta = MouseEvent.GetWheelDelta();
-		float ScrollSpeed = 50.0f; // Pixels per wheel tick
-		float NewOffset = CurrentOffset - (WheelDelta * ScrollSpeed);
-		TargetScrollBox->SetScrollOffset(NewOffset);
-		return FReply::Handled();
-	}
-	return FReply::Unhandled();
-}
-
-// ============================================================================
 // SChatMessage
 // ============================================================================
 
@@ -121,13 +37,13 @@ void SChatMessage::Construct(const FArguments& InArgs)
 {
 	bool bIsUser = InArgs._IsUser;
 	FString Message = InArgs._Message;
-	bUseMarkdown = InArgs._bRenderMarkdown && !bIsUser;  // Only render Markdown for Claude messages
-	bSelectionModeAttr = InArgs._bSelectionMode;
 
+	// Distinct colors for user vs assistant
 	FLinearColor BackgroundColor = bIsUser
 		? FLinearColor(0.13f, 0.13f, 0.18f, 1.0f)  // Dark blue-gray for user
 		: FLinearColor(0.08f, 0.08f, 0.08f, 1.0f);  // Near-black for assistant
 
+	// Accent bar color (left edge indicator like CLI prompt markers)
 	FLinearColor AccentColor = bIsUser
 		? FLinearColor(0.3f, 0.5f, 0.9f, 1.0f)   // Blue accent for user
 		: FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);   // Warm orange accent for Claude
@@ -139,29 +55,11 @@ void SChatMessage::Construct(const FArguments& InArgs)
 
 	FString RoleLabel = bIsUser ? TEXT("> You") : TEXT("Claude");
 
-	// Claude messages render through SMarkdownWidget; user messages stay plain text
-	TSharedPtr<SWidget> ContentWidget;
-	if (bUseMarkdown)
-	{
-		SAssignNew(MarkdownWidget, SMarkdownWidget)
-			.Text(Message)
-			.bDarkTheme(true)
-			.bSelectionMode_Lambda([this]() { return bSelectionModeAttr.Get(); });
-		ContentWidget = MarkdownWidget;
-	}
-	else
-	{
-		ContentWidget = SNew(STextBlock)
-			.Text(FText::FromString(Message))
-			.TextStyle(FAppStyle::Get(), "NormalText")
-			.ColorAndOpacity(FSlateColor(TextColor))
-			.AutoWrapText(true);
-	}
-
 	ChildSlot
 	[
 		SNew(SHorizontalBox)
 
+		// Left accent bar
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
 		[
@@ -174,6 +72,7 @@ void SChatMessage::Construct(const FArguments& InArgs)
 			]
 		]
 
+		// Message body
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
 		[
@@ -184,6 +83,7 @@ void SChatMessage::Construct(const FArguments& InArgs)
 			[
 				SNew(SVerticalBox)
 
+				// Role label
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				.Padding(0, 0, 0, 6)
@@ -194,10 +94,15 @@ void SChatMessage::Construct(const FArguments& InArgs)
 					.ColorAndOpacity(FSlateColor(RoleLabelColor))
 				]
 
+				// Message content
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				[
-					ContentWidget.ToSharedRef()
+					SNew(STextBlock)
+					.Text(FText::FromString(Message))
+					.TextStyle(FAppStyle::Get(), "NormalText")
+					.ColorAndOpacity(FSlateColor(TextColor))
+					.AutoWrapText(true)
 				]
 			]
 		]
@@ -213,45 +118,52 @@ void SClaudeEditorWidget::Construct(const FArguments& InArgs)
 	ChildSlot
 	[
 		SNew(SVerticalBox)
-
+		
+		// Toolbar
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
 			BuildToolbar()
 		]
-
+		
+		// Separator
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
 			SNew(SSeparator)
 		]
-
+		
+		// Chat area (fills remaining space)
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
 		[
 			BuildChatArea()
 		]
-
+		
+		// Separator
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
 			SNew(SSeparator)
 		]
-
+		
+		// Input area
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(8.0f)
 		[
 			BuildInputArea()
 		]
-
+		
+		// Status bar
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
 			BuildStatusBar()
 		]
 	];
-
+	
+	// Check Claude availability on startup
 	if (!IsClaudeAvailable())
 	{
 		AddMessage(TEXT("⚠️ Claude CLI not found.\n\nPlease install Claude Code:\n  npm install -g @anthropic-ai/claude-code\n\nThen authenticate:\n  claude auth login"), false);
@@ -260,6 +172,7 @@ void SClaudeEditorWidget::Construct(const FArguments& InArgs)
 	{
 		FString WelcomeMessage = TEXT("👋 Welcome to Unreal Claude!\n\nI'm ready to help with your UE5.7 project. Ask me about:\n• C++ code patterns and best practices\n• Blueprint integration\n• Engine systems (Nanite, Lumen, GAS, etc.)\n• Debugging and optimization\n\n");
 
+		// Add MCP tool status
 		WelcomeMessage += GenerateMCPStatusMessage();
 
 		WelcomeMessage += TEXT("\nType your question below and press Enter or click Send.");
@@ -269,7 +182,7 @@ void SClaudeEditorWidget::Construct(const FArguments& InArgs)
 
 SClaudeEditorWidget::~SClaudeEditorWidget()
 {
-	// Cancel any in-flight request so the worker thread can't fire callbacks into a destroyed widget
+	// Cancel any pending requests
 	FClaudeCodeSubsystem::Get().CancelCurrentRequest();
 }
 
@@ -279,14 +192,8 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildToolbar()
 		.bUE57ContextEnabled_Lambda([this]() { return bIncludeUE57Context; })
 		.bProjectContextEnabled_Lambda([this]() { return bIncludeProjectContext; })
 		.bRestoreEnabled_Lambda([this]() { return FClaudeCodeSubsystem::Get().HasSavedSession(); })
-		.bSelectionMode_Lambda([this]() { return bSelectionMode; })
 		.OnUE57ContextChanged_Lambda([this](bool bEnabled) { bIncludeUE57Context = bEnabled; })
 		.OnProjectContextChanged_Lambda([this](bool bEnabled) { bIncludeProjectContext = bEnabled; })
-		.OnSelectionModeChanged_Lambda([this](bool bEnabled) {
-				bSelectionMode = bEnabled;
-				// Force re-evaluation of dynamic _Lambda attributes that depend on bSelectionMode
-				Invalidate(EInvalidateWidgetReason::Layout);
-			})
 		.OnRefreshContext_Lambda([this]() { RefreshProjectContext(); })
 		.OnRestoreSession_Lambda([this]() { RestoreSession(); })
 		.OnNewSession_Lambda([this]() { NewSession(); })
@@ -296,22 +203,14 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildToolbar()
 
 TSharedRef<SWidget> SClaudeEditorWidget::BuildChatArea()
 {
-	TSharedRef<SScrollBox> ScrollBoxRef = SNew(SScrollBox)
-		+ SScrollBox::Slot()
-		[
-			SAssignNew(ChatMessagesBox, SVerticalBox)
-		];
-	ChatScrollBox = ScrollBoxRef;
-
-	// SRightClickDragBox sits above the scroll box so it can capture right-drag scroll input
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
 		.Padding(4.0f)
 		[
-			SNew(SRightClickDragBox)
-			.ScrollBox(ChatScrollBox)
+			SAssignNew(ChatScrollBox, SScrollBox)
+			+ SScrollBox::Slot()
 			[
-				ScrollBoxRef
+				SAssignNew(ChatMessagesBox, SVerticalBox)
 			]
 		];
 }
@@ -334,7 +233,8 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildStatusBar()
 		.Padding(FMargin(8.0f, 4.0f))
 		[
 			SNew(SHorizontalBox)
-
+			
+			// Status indicator
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
@@ -343,13 +243,14 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildStatusBar()
 				.Text(this, &SClaudeEditorWidget::GetStatusText)
 				.ColorAndOpacity(this, &SClaudeEditorWidget::GetStatusColor)
 			]
-
+			
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
 			[
 				SNullWidget::NullWidget
 			]
-
+			
+			// Project path (convert to absolute and shorten home dir to ~/)
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
@@ -358,7 +259,8 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildStatusBar()
 				.Text_Lambda([]() -> FText {
 					FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath());
 					FString HomeDir = FPlatformProcess::UserHomeDir();
-					// Strip trailing slashes so the prefix match works regardless of UserHomeDir() format
+					// Normalize: strip any trailing slashes so the replacement is consistent
+					// regardless of whether UserHomeDir() returns "/Users/x" or "/Users/x/"
 					while (HomeDir.EndsWith(TEXT("/")))
 					{
 						HomeDir.LeftChopInline(1);
@@ -377,14 +279,9 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildStatusBar()
 
 void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 {
-	// MessageHistory drives RebuildChatDisplay when selection mode toggles
-	MessageHistory.Add(TPair<FString, bool>(Message, bIsUser));
-
 	if (ChatMessagesBox.IsValid())
 	{
-		// Capture scroll position before mutation so we can preserve it (or auto-scroll) after
-		bool bWasAtBottom = IsScrolledToBottom();
-
+		// Add a thin separator line between messages for visual clarity
 		if (ChatMessagesBox->NumSlots() > 0)
 		{
 			ChatMessagesBox->AddSlot()
@@ -403,65 +300,19 @@ void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 			SNew(SChatMessage)
 			.Message(Message)
 			.IsUser(bIsUser)
-			.bRenderMarkdown(!bIsUser)  // Enable Markdown rendering for Claude messages
-			.bSelectionMode_Lambda([this, bIsUser]() { return bSelectionMode && !bIsUser; })  // Dynamic: only for Claude messages
 		];
 
-		// Only scroll to bottom if we were already there
-		if (bWasAtBottom)
+		// Scroll to bottom
+		if (ChatScrollBox.IsValid())
 		{
-			ScrollToEnd();
+			ChatScrollBox->ScrollToEnd();
 		}
-	}
-}
-
-void SClaudeEditorWidget::RebuildChatMessages()
-{
-	if (!ChatMessagesBox.IsValid())
-	{
-		return;
-	}
-
-	bool bWasAtBottom = IsScrolledToBottom();
-
-	ChatMessagesBox->ClearChildren();
-
-	for (int32 i = 0; i < MessageHistory.Num(); ++i)
-	{
-		const FString& Message = MessageHistory[i].Key;
-		bool bIsUser = MessageHistory[i].Value;
-
-		if (i > 0)
-		{
-			ChatMessagesBox->AddSlot()
-			.AutoHeight()
-			.Padding(FMargin(8.0f, 2.0f))
-			[
-				SNew(SSeparator)
-				.ColorAndOpacity(FLinearColor(0.15f, 0.15f, 0.15f, 0.5f))
-			];
-		}
-
-		ChatMessagesBox->AddSlot()
-		.AutoHeight()
-		.Padding(FMargin(4.0f, 6.0f, 4.0f, 6.0f))
-		[
-			SNew(SChatMessage)
-			.Message(Message)
-			.IsUser(bIsUser)
-			.bRenderMarkdown(!bIsUser)
-			.bSelectionMode_Lambda([this, bIsUser]() { return bSelectionMode && !bIsUser; })
-		];
-	}
-
-	if (bWasAtBottom)
-	{
-		ScrollToEnd();
 	}
 }
 
 void SClaudeEditorWidget::SendMessage()
 {
+	// Extract image paths before checking emptiness
 	TArray<FString> ImagePaths;
 	if (InputArea.IsValid())
 	{
@@ -482,6 +333,7 @@ void SClaudeEditorWidget::SendMessage()
 		return;
 	}
 
+	// Build display message
 	FString DisplayMessage = bHasText ? CurrentInputText : FString();
 	if (bHasImage)
 	{
@@ -510,21 +362,26 @@ void SClaudeEditorWidget::SendMessage()
 		}
 	}
 
+	// Add user message to chat
 	AddMessage(DisplayMessage, true);
 
-	// Image-only sends still need a prompt or the API rejects the request
+	// Build prompt - use default if image-only
 	FString Prompt = bHasText ? CurrentInputText : TEXT("Please analyze this image.");
 
+	// Clear input
 	CurrentInputText.Empty();
 	if (InputArea.IsValid())
 	{
 		InputArea->ClearText();
 	}
 
+	// Set waiting state
 	bIsWaitingForResponse = true;
 
+	// Start streaming response display
 	StartStreamingResponse();
 
+	// Send to Claude using FClaudePromptOptions
 	FOnClaudeResponse OnComplete;
 	OnComplete.BindSP(this, &SClaudeEditorWidget::OnClaudeResponse);
 
@@ -579,6 +436,7 @@ void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSucces
 		}
 	}
 
+	// Clear streaming state
 	StreamingResponse.Empty();
 }
 
@@ -589,11 +447,11 @@ void SClaudeEditorWidget::ClearChat()
 		ChatMessagesBox->ClearChildren();
 	}
 
-	MessageHistory.Empty();
 	FClaudeCodeSubsystem::Get().ClearHistory();
 	LastResponse.Empty();
 	ResetStreamingState();
 
+	// Add welcome message again
 	AddMessage(TEXT("Chat cleared. Ready for new questions!"), false);
 }
 
@@ -619,11 +477,13 @@ void SClaudeEditorWidget::RestoreSession()
 
 	if (Subsystem.LoadSession())
 	{
+		// Clear current chat display
 		if (ChatMessagesBox.IsValid())
 		{
 			ChatMessagesBox->ClearChildren();
 		}
 
+		// Restore messages to chat display
 		const TArray<TPair<FString, FString>>& History = Subsystem.GetHistory();
 
 		if (History.Num() > 0)
@@ -651,18 +511,20 @@ void SClaudeEditorWidget::RestoreSession()
 
 void SClaudeEditorWidget::NewSession()
 {
+	// Clear the chat display
 	if (ChatMessagesBox.IsValid())
 	{
 		ChatMessagesBox->ClearChildren();
 	}
 
-	MessageHistory.Empty();
-
+	// Clear the subsystem history
 	FClaudeCodeSubsystem::Get().ClearHistory();
 
+	// Clear local state
 	LastResponse.Empty();
 	ResetStreamingState();
 
+	// Add welcome message
 	AddMessage(TEXT("New session started. Previous context has been cleared."), false);
 	AddMessage(TEXT("Ready for new questions!"), false);
 }
@@ -676,16 +538,7 @@ FText SClaudeEditorWidget::GetStatusText() const
 {
 	if (bIsWaitingForResponse)
 	{
-		const IClaudeRunner* Runner = FClaudeCodeSubsystem::Get().GetRunner();
-		if (Runner && Runner->IsSilenceWarningActive())
-		{
-			const int32 SilenceSec = FMath::FloorToInt(Runner->GetSilenceSeconds());
-			return FText::FromString(FString::Printf(
-				TEXT("⚠ No output from Claude for %ds — may be stuck in Agent SDK. Cancel and retry if this persists."),
-				SilenceSec));
-		}
-
-		const double ElapsedSec = FPlatformTime::Seconds() - StreamingStartTime;
+		double ElapsedSec = FPlatformTime::Seconds() - StreamingStartTime;
 		FString StatusStr = FString::Printf(TEXT("● Claude is thinking... %.1fs"), ElapsedSec);
 
 		if (StreamingToolCallCount > 0)
@@ -714,11 +567,6 @@ FSlateColor SClaudeEditorWidget::GetStatusColor() const
 {
 	if (bIsWaitingForResponse)
 	{
-		const IClaudeRunner* Runner = FClaudeCodeSubsystem::Get().GetRunner();
-		if (Runner && Runner->IsSilenceWarningActive())
-		{
-			return FSlateColor(FLinearColor(1.0f, 0.5f, 0.0f)); // Orange warning
-		}
 		return FSlateColor(FLinearColor(1.0f, 0.8f, 0.0f)); // Yellow
 	}
 
@@ -765,6 +613,7 @@ void SClaudeEditorWidget::StartStreamingResponse()
 
 	if (ChatMessagesBox.IsValid())
 	{
+		// Add separator before streaming response
 		if (ChatMessagesBox->NumSlots() > 0)
 		{
 			ChatMessagesBox->AddSlot()
@@ -776,11 +625,13 @@ void SClaudeEditorWidget::StartStreamingResponse()
 			];
 		}
 
-		// First text segment is wrapped in its own container so it can be swapped for Markdown / code blocks on finalize
+		// Create the first text segment container
 		TSharedPtr<SVerticalBox> FirstSegmentContainer;
 
+		// Build the inner content box with role label + first text segment
 		SAssignNew(StreamingContentBox, SVerticalBox)
 
+		// Role label
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(0, 0, 0, 6)
@@ -791,6 +642,7 @@ void SClaudeEditorWidget::StartStreamingResponse()
 			.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.6f, 0.3f)))
 		]
 
+		// First text segment (wrapped in container for code block replacement)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
@@ -809,13 +661,14 @@ void SClaudeEditorWidget::StartStreamingResponse()
 		TextSegmentBlocks.Add(StreamingTextBlock);
 		TextSegmentContainers.Add(FirstSegmentContainer);
 
-		// Wrap content box in accent bar + border (matches SChatMessage style)
+		// Wrap content box in accent bar + border (matching SChatMessage style)
 		ChatMessagesBox->AddSlot()
 		.AutoHeight()
 		.Padding(FMargin(4.0f, 6.0f, 4.0f, 6.0f))
 		[
 			SNew(SHorizontalBox)
 
+			// Left accent bar (orange for Claude)
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			[
@@ -828,6 +681,7 @@ void SClaudeEditorWidget::StartStreamingResponse()
 				]
 			]
 
+			// Message body containing the dynamic content box
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
 			[
@@ -840,29 +694,34 @@ void SClaudeEditorWidget::StartStreamingResponse()
 				]
 			]
 		];
+
+		// Scroll to bottom
+		if (ChatScrollBox.IsValid())
+		{
+			ChatScrollBox->ScrollToEnd();
 		}
-
-		ScrollToEnd();
 	}
+}
 
-	void SClaudeEditorWidget::OnClaudeProgress(const FString& PartialOutput)
+void SClaudeEditorWidget::OnClaudeProgress(const FString& PartialOutput)
+{
+	// Append to total and current segment
+	StreamingResponse += PartialOutput;
+	CurrentSegmentText += PartialOutput;
+
+	// Update the current text segment block
+	if (StreamingTextBlock.IsValid())
 	{
-		bool bWasAtBottom = IsScrolledToBottom();
-
-		StreamingResponse += PartialOutput;
-		CurrentSegmentText += PartialOutput;
-
-		if (StreamingTextBlock.IsValid())
-		{
-			StreamingTextBlock->SetText(FText::FromString(CurrentSegmentText));
-		}
-
-		// Scroll-stickiness: only auto-scroll if the user was already pinned to bottom
-		if (bWasAtBottom)
-		{
-			ScrollToEnd();
-		}
+		StreamingTextBlock->SetText(FText::FromString(CurrentSegmentText));
 	}
+
+	// Auto-scroll to bottom as content streams in
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
+}
+
 void SClaudeEditorWidget::OnClaudeStreamEvent(const FClaudeStreamEvent& Event)
 {
 	switch (Event.Type)
@@ -905,11 +764,10 @@ void SClaudeEditorWidget::OnClaudeStreamEvent(const FClaudeStreamEvent& Event)
 
 void SClaudeEditorWidget::FinalizeStreamingResponse()
 {
+	// Save the final text segment
 	AllTextSegments.Add(CurrentSegmentText);
 
-	LastResponse = StreamingResponse.IsEmpty() ? CurrentSegmentText : StreamingResponse;
-
-	// Stitch all segments back together so CopyToClipboard returns the full response
+	// Rebuild StreamingResponse from all segments for copy support
 	FString Rebuilt;
 	for (const FString& Segment : AllTextSegments)
 	{
@@ -918,31 +776,20 @@ void SClaudeEditorWidget::FinalizeStreamingResponse()
 	if (!Rebuilt.IsEmpty())
 	{
 		StreamingResponse = Rebuilt;
-		LastResponse = StreamingResponse;
 	}
 
-	// Render each segment in its own container so text appears before/after tool blocks in the right order
-	for (int32 i = 0; i < TextSegmentContainers.Num() && i < AllTextSegments.Num(); ++i)
+	// For simple single-segment responses (no tool events), ensure text block is up to date
+	if (StreamingTextBlock.IsValid() && !StreamingResponse.IsEmpty() && TextSegmentBlocks.Num() <= 1)
 	{
-		if (TextSegmentContainers[i].IsValid() && !AllTextSegments[i].IsEmpty())
-		{
-			TextSegmentContainers[i]->ClearChildren();
-			TextSegmentContainers[i]->AddSlot()
-			.AutoHeight()
-			[
-				SNew(SMarkdownWidget)
-				.Text(AllTextSegments[i])
-				.bDarkTheme(true)
-				.bSelectionMode_Lambda([this]() { return bSelectionMode; })
-			];
-		}
-		else if (TextSegmentContainers[i].IsValid() && AllTextSegments[i].IsEmpty())
-		{
-			TextSegmentContainers[i]->SetVisibility(EVisibility::Collapsed);
-		}
+		StreamingTextBlock->SetText(FText::FromString(StreamingResponse));
 	}
 
-	// StreamingResponse intentionally NOT reset here — OnClaudeResponse reads it after this returns
+	LastResponse = StreamingResponse;
+
+	// Post-process text segments to render code blocks
+	ParseAndRenderCodeBlocks();
+
+	// Clear all streaming state (except StreamingResponse which is used by OnClaudeResponse)
 	StreamingTextBlock.Reset();
 	StreamingContentBox.Reset();
 	CurrentSegmentText.Empty();
@@ -968,27 +815,30 @@ void SClaudeEditorWidget::HandleToolUseEvent(const FClaudeStreamEvent& Event)
 		return;
 	}
 
+	// Track tool call count for status bar
 	StreamingToolCallCount++;
 
-	// Tool name is stored by call id so the matching tool_result event can look it back up
+	// Store tool name for later lookup
 	ToolCallNames.Add(Event.ToolCallId, Event.ToolName);
 
 	FString DisplayName = GetDisplayToolName(Event.ToolName);
 
-	// Consecutive tool calls (no intervening text) merge into the same expandable group
+	// Check if this is a consecutive tool (no text since last tool = same group)
 	bool bIsConsecutive = CurrentSegmentText.IsEmpty() && ToolGroupInnerBox.IsValid();
 
 	if (!bIsConsecutive)
 	{
-		// Freeze the current text segment before starting a new tool group
+		// Freeze the current text segment
 		AllTextSegments.Add(CurrentSegmentText);
 		CurrentSegmentText.Empty();
 
+		// Collapse empty text segment
 		if (AllTextSegments.Last().IsEmpty() && TextSegmentContainers.Num() > 0)
 		{
 			TextSegmentContainers.Last()->SetVisibility(EVisibility::Collapsed);
 		}
 
+		// Start a new tool group
 		ToolGroupCount = 0;
 		ToolGroupDoneCount = 0;
 		ToolGroupCallIds.Empty();
@@ -1018,7 +868,7 @@ void SClaudeEditorWidget::HandleToolUseEvent(const FClaudeStreamEvent& Event)
 			]
 		];
 
-		// New text segment container catches any text that arrives after this tool group
+		// Create a new text segment for text after this tool group
 		TSharedPtr<SVerticalBox> NewSegmentContainer;
 
 		StreamingContentBox->AddSlot()
@@ -1062,6 +912,7 @@ void SClaudeEditorWidget::HandleToolUseEvent(const FClaudeStreamEvent& Event)
 		}
 	}
 
+	// Add tool entry to the current group
 	ToolGroupCount++;
 	ToolGroupCallIds.Add(Event.ToolCallId);
 
@@ -1121,14 +972,22 @@ void SClaudeEditorWidget::HandleToolUseEvent(const FClaudeStreamEvent& Event)
 	ToolCallResultTexts.Add(Event.ToolCallId, ResultText);
 	ToolCallExpandables.Add(Event.ToolCallId, ExpandArea);
 
+	// Update group summary header
 	UpdateToolGroupSummary();
 
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
 }
+
 void SClaudeEditorWidget::HandleToolResultEvent(const FClaudeStreamEvent& Event)
 {
+	// Look up tool name
 	const FString* ToolNamePtr = ToolCallNames.Find(Event.ToolCallId);
 	FString ToolName = ToolNamePtr ? GetDisplayToolName(*ToolNamePtr) : TEXT("Tool");
 
+	// Update status label to show completion
 	TSharedPtr<STextBlock>* StatusLabelPtr = ToolCallStatusLabels.Find(Event.ToolCallId);
 	if (StatusLabelPtr && StatusLabelPtr->IsValid())
 	{
@@ -1136,7 +995,7 @@ void SClaudeEditorWidget::HandleToolResultEvent(const FClaudeStreamEvent& Event)
 		(*StatusLabelPtr)->SetColorAndOpacity(FSlateColor(FLinearColor(0.3f, 0.75f, 0.3f)));
 	}
 
-	// Truncate large tool outputs so the expandable doesn't blow up the widget
+	// Set result text (truncated for display)
 	TSharedPtr<STextBlock>* ResultTextPtr = ToolCallResultTexts.Find(Event.ToolCallId);
 	if (ResultTextPtr && ResultTextPtr->IsValid())
 	{
@@ -1148,16 +1007,22 @@ void SClaudeEditorWidget::HandleToolResultEvent(const FClaudeStreamEvent& Event)
 		(*ResultTextPtr)->SetText(FText::FromString(ResultContent));
 	}
 
+	// Make expandable area visible
 	TSharedPtr<SExpandableArea>* ExpandPtr = ToolCallExpandables.Find(Event.ToolCallId);
 	if (ExpandPtr && ExpandPtr->IsValid())
 	{
 		(*ExpandPtr)->SetVisibility(EVisibility::Visible);
 	}
 
+	// Update group summary
 	ToolGroupDoneCount++;
 	UpdateToolGroupSummary();
-	}
 
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
+}
 
 void SClaudeEditorWidget::HandleResultEvent(const FClaudeStreamEvent& Event)
 {
@@ -1166,12 +1031,13 @@ void SClaudeEditorWidget::HandleResultEvent(const FClaudeStreamEvent& Event)
 		return;
 	}
 
-	// Collapse the trailing text block if no text was emitted after the last tool group
+	// Collapse empty trailing text block if no text followed the last tool
 	if (CurrentSegmentText.IsEmpty() && TextSegmentContainers.Num() > 0)
 	{
 		TextSegmentContainers.Last()->SetVisibility(EVisibility::Collapsed);
 	}
 
+	// Format stats footer
 	float DurationSec = Event.DurationMs / 1000.0f;
 	FString StatsText = FString::Printf(TEXT("Done in %.1fs"), DurationSec);
 
@@ -1186,8 +1052,10 @@ void SClaudeEditorWidget::HandleResultEvent(const FClaudeStreamEvent& Event)
 		StatsText += FString::Printf(TEXT(" | $%.4f"), Event.TotalCostUsd);
 	}
 
+	// Store final stats for the status bar
 	LastResultStats = StatsText;
 
+	// Append stats footer to content box
 	StreamingContentBox->AddSlot()
 	.AutoHeight()
 	.Padding(0, 8, 0, 0)
@@ -1197,6 +1065,11 @@ void SClaudeEditorWidget::HandleResultEvent(const FClaudeStreamEvent& Event)
 		.TextStyle(FAppStyle::Get(), "SmallText")
 		.ColorAndOpacity(FSlateColor(FLinearColor(0.4f, 0.4f, 0.45f)))
 	];
+
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
 }
 
 void SClaudeEditorWidget::HandleRefusalEvent(const FClaudeStreamEvent& Event)
@@ -1206,6 +1079,7 @@ void SClaudeEditorWidget::HandleRefusalEvent(const FClaudeStreamEvent& Event)
 		return;
 	}
 
+	// Display a refusal notice in the streaming content box
 	FString RefusalMessage = TEXT("Response refused by content safety filter. Please rephrase your request.");
 
 	StreamingContentBox->AddSlot()
@@ -1224,12 +1098,21 @@ void SClaudeEditorWidget::HandleRefusalEvent(const FClaudeStreamEvent& Event)
 			.AutoWrapText(true)
 		]
 	];
+
+	// The refused turn is prevented from being saved to history because
+	// bRefusalDetected causes bSuccess=false in the completion callback,
+	// which skips AddExchange. No need to clear prior valid history.
+
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
 }
 
 FString SClaudeEditorWidget::GetDisplayToolName(const FString& FullToolName)
 {
 	FString Name = FullToolName;
-	// Bridge prefixes every tool with mcp__unrealclaude__unreal_; trim it for the chat label
+	// Strip common MCP server prefix for cleaner display
 	Name.RemoveFromStart(TEXT("mcp__unrealclaude__unreal_"));
 	return Name;
 }
@@ -1243,6 +1126,7 @@ void SClaudeEditorWidget::UpdateToolGroupSummary()
 
 	if (ToolGroupCount == 1)
 	{
+		// Single tool - show its name in the header
 		FString DisplayName = TEXT("Tool");
 		if (ToolGroupCallIds.Num() > 0)
 		{
@@ -1268,6 +1152,7 @@ void SClaudeEditorWidget::UpdateToolGroupSummary()
 	}
 	else
 	{
+		// Multiple tools - show count summary
 		if (ToolGroupDoneCount >= ToolGroupCount)
 		{
 			ToolGroupSummaryText->SetText(FText::FromString(
@@ -1369,6 +1254,7 @@ void SClaudeEditorWidget::ParseAndRenderCodeBlocks()
 			continue;
 		}
 
+		// Get the segment text
 		FString SegmentText;
 		if (i < AllTextSegments.Num())
 		{
@@ -1384,6 +1270,7 @@ void SClaudeEditorWidget::ParseAndRenderCodeBlocks()
 			continue;
 		}
 
+		// Parse into code and plain text sections
 		TArray<TPair<FString, bool>> Sections;
 		ParseCodeFences(SegmentText, Sections);
 
@@ -1392,6 +1279,7 @@ void SClaudeEditorWidget::ParseAndRenderCodeBlocks()
 			continue;
 		}
 
+		// Replace container contents with parsed sections
 		Container->ClearChildren();
 
 		for (const TPair<FString, bool>& Section : Sections)
@@ -1418,6 +1306,7 @@ void SClaudeEditorWidget::ParseAndRenderCodeBlocks()
 			}
 			else
 			{
+				// Plain text
 				Container->AddSlot()
 				.AutoHeight()
 				[
@@ -1434,6 +1323,7 @@ void SClaudeEditorWidget::ParseAndRenderCodeBlocks()
 
 void SClaudeEditorWidget::AppendToLastResponse(const FString& Text)
 {
+	// Delegate to OnClaudeProgress for streaming updates
 	OnClaudeProgress(Text);
 }
 
@@ -1469,10 +1359,12 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 		return StatusMessage;
 	}
 
+	// Try to get MCP server
 	TSharedPtr<FUnrealClaudeMCPServer> MCPServer = FUnrealClaudeModule::Get().GetMCPServer();
 
 	if (!MCPServer.IsValid() || !MCPServer->IsRunning())
 	{
+		// MCP server not running
 		StatusMessage += TEXT("❌ MCP Server: NOT RUNNING\n\n");
 		StatusMessage += TEXT("⚠️ MCP tools are unavailable.\n\n");
 		StatusMessage += TEXT("Troubleshooting:\n");
@@ -1483,6 +1375,7 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 		return StatusMessage;
 	}
 
+	// MCP server running - check tools
 	TSharedPtr<FMCPToolRegistry> ToolRegistry = MCPServer->GetToolRegistry();
 	if (!ToolRegistry.IsValid())
 	{
@@ -1491,17 +1384,20 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 		return StatusMessage;
 	}
 
+	// Get registered tools
 	TArray<FMCPToolInfo> RegisteredTools = ToolRegistry->GetAllTools();
 
-	// Build a set for O(1) lookup instead of N*M Contains scans below
+	// Build set of registered tool names for quick lookup
 	TSet<FString> RegisteredToolNames;
 	for (const FMCPToolInfo& Tool : RegisteredTools)
 	{
 		RegisteredToolNames.Add(Tool.Name);
 	}
 
+	// Get expected tools from constants
 	const TArray<FString>& ExpectedTools = UnrealClaudeConstants::MCPServer::ExpectedTools;
 
+	// Check each expected tool - only track missing ones
 	int32 AvailableCount = 0;
 	TArray<FString> MissingTools;
 
@@ -1517,17 +1413,14 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 		}
 	}
 
+	// Summary - only show details if there are issues
 	if (MissingTools.Num() == 0)
 	{
-		// "User-visible" count reflects what the bridge advertises to MCP clients (12 simple
-		// tools + the unreal_ue mega-router + 2 bridge helpers = 15). The other 13 backend
-		// handlers are routed through unreal_ue (7 mega tools) or hidden infrastructure
-		// (9: task_*, execute_script, cleanup_scripts, get_script_history, run_console_command).
-		StatusMessage += FString::Printf(TEXT("  ✓ All 15 user-visible tools available (%d backend handlers, 7 routed via unreal_ue, 9 hidden infrastructure)\n"), AvailableCount);
+		StatusMessage += FString::Printf(TEXT("  ✓ All %d tools operational\n"), AvailableCount);
 	}
 	else
 	{
-		StatusMessage += FString::Printf(TEXT("  ⚠️ %d/%d backend handlers available (15 user-visible when healthy)\n"), AvailableCount, ExpectedTools.Num());
+		StatusMessage += FString::Printf(TEXT("  ✓ %d/%d tools available\n"), AvailableCount, ExpectedTools.Num());
 		StatusMessage += TEXT("\n⚠️ Missing tools:\n");
 		for (const FString& ToolName : MissingTools)
 		{
@@ -1539,28 +1432,6 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 	StatusMessage += TEXT("─────────────────────────────────");
 
 	return StatusMessage;
-}
-
-bool SClaudeEditorWidget::IsScrolledToBottom() const
-{
-	if (!ChatScrollBox.IsValid())
-	{
-		return true;  // Default to true so initial messages scroll to bottom
-	}
-
-	float CurrentOffset = ChatScrollBox->GetScrollOffset();
-	float EndOffset = ChatScrollBox->GetScrollOffsetOfEnd();
-
-	// "At bottom" tolerance: within 50px of end so slow streaming + sub-pixel rounding don't break stickiness
-	return (EndOffset - CurrentOffset) <= 50.0f;
-}
-
-void SClaudeEditorWidget::ScrollToEnd()
-{
-	if (ChatScrollBox.IsValid())
-	{
-		ChatScrollBox->ScrollToEnd();
-	}
 }
 
 #undef LOCTEXT_NAMESPACE

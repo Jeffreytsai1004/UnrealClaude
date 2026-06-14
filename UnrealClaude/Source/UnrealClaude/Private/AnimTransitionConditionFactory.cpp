@@ -44,7 +44,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::CreateTransitionConditionNode(
 	}
 	else if (NormalizedType == TEXT("comparefloat") || NormalizedType == TEXT("compare_float"))
 	{
-		FString ComparisonOp = TEXT("Less");
+		FString ComparisonOp = TEXT("Less"); // Default
 		if (Params.IsValid() && Params->HasField(TEXT("comparison")))
 		{
 			ComparisonOp = Params->GetStringField(TEXT("comparison"));
@@ -121,6 +121,7 @@ bool FAnimTransitionConditionFactory::ConnectTransitionNodes(
 		return false;
 	}
 
+	// Find source node
 	UEdGraphNode* SourceNode = FAnimGraphEditor::FindNodeById(TransitionGraph, SourceNodeId);
 	if (!SourceNode)
 	{
@@ -128,6 +129,7 @@ bool FAnimTransitionConditionFactory::ConnectTransitionNodes(
 		return false;
 	}
 
+	// Find target node
 	UEdGraphNode* TargetNode = FAnimGraphEditor::FindNodeById(TransitionGraph, TargetNodeId);
 	if (!TargetNode)
 	{
@@ -135,7 +137,7 @@ bool FAnimTransitionConditionFactory::ConnectTransitionNodes(
 		return false;
 	}
 
-	// Output pin name fallback: explicit name, then ReturnValue (CallFunction nodes), then Result
+	// Find source pin with fallback
 	UEdGraphPin* SourcePin = FAnimNodePinUtils::FindPinByName(SourceNode, SourcePinName, EGPD_Output);
 	if (!SourcePin)
 	{
@@ -151,6 +153,7 @@ bool FAnimTransitionConditionFactory::ConnectTransitionNodes(
 		return false;
 	}
 
+	// Find target pin with fallback
 	UEdGraphPin* TargetPin = FAnimNodePinUtils::FindPinByName(TargetNode, TargetPinName, EGPD_Input);
 	if (!TargetPin)
 	{
@@ -210,6 +213,7 @@ bool FAnimTransitionConditionFactory::ConnectTransitionNodes(
 		}
 	}
 
+	// Make connection
 	SourcePin->MakeLinkTo(TargetPin);
 	TransitionGraph->Modify();
 
@@ -228,6 +232,7 @@ bool FAnimTransitionConditionFactory::ConnectToTransitionResult(
 		return false;
 	}
 
+	// Find condition node
 	UEdGraphNode* ConditionNode = FAnimGraphEditor::FindNodeById(TransitionGraph, ConditionNodeId);
 	if (!ConditionNode)
 	{
@@ -235,6 +240,7 @@ bool FAnimTransitionConditionFactory::ConnectToTransitionResult(
 		return false;
 	}
 
+	// Find condition output pin using fallback strategy
 	TArray<FName> ConditionPinNames;
 	if (!ConditionPinName.IsEmpty())
 	{
@@ -253,6 +259,7 @@ bool FAnimTransitionConditionFactory::ConnectToTransitionResult(
 		return false;
 	}
 
+	// Find result node
 	UEdGraphNode* ResultNode = FAnimNodePinUtils::FindResultNode(TransitionGraph);
 	if (!ResultNode)
 	{
@@ -260,6 +267,7 @@ bool FAnimTransitionConditionFactory::ConnectToTransitionResult(
 		return false;
 	}
 
+	// Find transition result input pin
 	auto ResultConfig = FPinSearchConfig::Input({
 		FName("bCanEnterTransition"),
 		FName("CanEnterTransition"),
@@ -272,6 +280,7 @@ bool FAnimTransitionConditionFactory::ConnectToTransitionResult(
 		return false;
 	}
 
+	// Make connection
 	ConditionPin->MakeLinkTo(ResultPin);
 	TransitionGraph->Modify();
 
@@ -311,10 +320,11 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 	FAnimGraphEditor::SetNodeId(GetVarNode, GetVarNodeId);
 	GetVarNode->AllocateDefaultPins();
 
+	// Find variable output pin and determine type
 	auto VarOutputConfig = FPinSearchConfig::Output({}).AcceptAny();
 	UEdGraphPin* VarOutputPin = FAnimNodePinUtils::FindPinWithFallbacks(GetVarNode, VarOutputConfig);
 
-	// Detect pin type so the comparison node is created with the right function signature
+	// Detect pin type for proper comparison node creation
 	bool bIsBooleanVariable = false;
 	EComparisonPinType PinType = EComparisonPinType::Float;
 
@@ -331,7 +341,7 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 		}
 		else if (VarOutputPin->PinType.PinCategory == UEdGraphSchema_K2::PC_Byte)
 		{
-			// Byte with a PinSubCategoryObject is actually an enum-backed UENUM variable
+			// Check if it's an enum
 			if (VarOutputPin->PinType.PinSubCategoryObject.IsValid())
 			{
 				PinType = EComparisonPinType::Enum;
@@ -345,6 +355,7 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 		{
 			PinType = EComparisonPinType::Enum;
 		}
+		// Float/Double remains the default
 	}
 
 	// Step 2: Create Comparison node with appropriate type
@@ -358,6 +369,7 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 	FString CompNodeId = FAnimGraphEditor::GenerateAnimNodeId(TEXT("Comp"), ComparisonType, TransitionGraph);
 	FAnimGraphEditor::SetNodeId(CompNode, CompNodeId);
 
+	// Step 3: Connect variable to comparison input A
 	auto CompInputConfig = FPinSearchConfig::Input({ FName("A") }).AcceptAny();
 	UEdGraphPin* CompInputA = FAnimNodePinUtils::FindPinWithFallbacks(CompNode, CompInputConfig);
 	if (VarOutputPin && CompInputA)
@@ -365,6 +377,7 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 		VarOutputPin->MakeLinkTo(CompInputA);
 	}
 
+	// Step 4: Set comparison value on pin B
 	UEdGraphPin* CompInputB = FAnimNodePinUtils::FindPinByName(CompNode, TEXT("B"), EGPD_Input);
 	if (CompInputB && !CompareValue.IsEmpty())
 	{
@@ -379,6 +392,7 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 		}
 	}
 
+	// Step 5: Find result node and its input pin
 	UEdGraphNode* ResultNode = FAnimNodePinUtils::FindResultNode(TransitionGraph);
 	UEdGraphPin* ResultInputPin = nullptr;
 	UEdGraphPin* ExistingConnection = nullptr;
@@ -398,15 +412,17 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 		}
 	}
 
+	// Get comparison output pin
 	auto CompOutputConfig = FPinSearchConfig::Output({
 		FName("ReturnValue")
 	}).WithCategory(UEdGraphSchema_K2::PC_Boolean);
 	UEdGraphPin* CompOutputPin = FAnimNodePinUtils::FindPinWithFallbacks(CompNode, CompOutputConfig);
 
-	// If the result pin already has a condition wired in, splice an AND node between them
+	// Step 6: Connect to result (with AND chaining if needed)
 	FString AndNodeId;
 	if (ExistingConnection && CompOutputPin && ResultInputPin)
 	{
+		// Create AND node for chaining
 		FVector2D AndPos(Position.X + 400, Position.Y);
 		UEdGraphNode* AndNode = CreateLogicNode(TransitionGraph, TEXT("And"), AndPos, OutError);
 		if (AndNode)
@@ -436,6 +452,7 @@ TSharedPtr<FJsonObject> FAnimTransitionConditionFactory::CreateComparisonChain(
 
 	TransitionGraph->Modify();
 
+	// Build success result
 	Result->SetBoolField(TEXT("success"), true);
 	Result->SetStringField(TEXT("variable_node_id"), GetVarNodeId);
 	Result->SetStringField(TEXT("comparison_node_id"), CompNodeId);
@@ -530,6 +547,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::CreateComparisonNode(
 
 	if (bIsBooleanType || PinType == EComparisonPinType::Boolean)
 	{
+		// Boolean comparison
 		if (ComparisonType.Equals(TEXT("Equal"), ESearchCase::IgnoreCase))
 		{
 			FunctionName = GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, EqualEqual_BoolBool);
@@ -546,6 +564,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::CreateComparisonNode(
 	}
 	else if (PinType == EComparisonPinType::Integer)
 	{
+		// Integer comparison
 		if (ComparisonType.Equals(TEXT("Greater"), ESearchCase::IgnoreCase))
 		{
 			FunctionName = GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Greater_IntInt);
@@ -578,7 +597,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::CreateComparisonNode(
 	}
 	else if (PinType == EComparisonPinType::Byte || PinType == EComparisonPinType::Enum)
 	{
-		// Enums are stored as bytes in UE, so both share the ByteByte comparison functions
+		// Byte/Enum comparison (enums are stored as bytes)
 		if (ComparisonType.Equals(TEXT("Equal"), ESearchCase::IgnoreCase))
 		{
 			FunctionName = GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, EqualEqual_ByteByte);
@@ -611,6 +630,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::CreateComparisonNode(
 	}
 	else
 	{
+		// Float/Double comparison (default)
 		if (ComparisonType.Equals(TEXT("Greater"), ESearchCase::IgnoreCase))
 		{
 			FunctionName = GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Greater_DoubleDouble);
@@ -797,9 +817,12 @@ bool FAnimTransitionConditionFactory::IsComparisonNode(
 		return false;
 	}
 
+	// Get the function name
 	FName FunctionName = CallNode->FunctionReference.GetMemberName();
 	FString FuncStr = FunctionName.ToString();
 
+	// Map function names to comparison types and pin types
+	// Float/Double comparisons
 	if (FuncStr == TEXT("Greater_DoubleDouble"))
 	{
 		OutComparisonType = TEXT("Greater");
@@ -836,6 +859,7 @@ bool FAnimTransitionConditionFactory::IsComparisonNode(
 		OutPinType = EComparisonPinType::Float;
 		return true;
 	}
+	// Integer comparisons
 	else if (FuncStr == TEXT("Greater_IntInt"))
 	{
 		OutComparisonType = TEXT("Greater");
@@ -872,6 +896,7 @@ bool FAnimTransitionConditionFactory::IsComparisonNode(
 		OutPinType = EComparisonPinType::Integer;
 		return true;
 	}
+	// Byte/Enum comparisons
 	else if (FuncStr == TEXT("Greater_ByteByte"))
 	{
 		OutComparisonType = TEXT("Greater");
@@ -908,6 +933,7 @@ bool FAnimTransitionConditionFactory::IsComparisonNode(
 		OutPinType = EComparisonPinType::Byte;
 		return true;
 	}
+	// Boolean comparisons
 	else if (FuncStr == TEXT("EqualEqual_BoolBool"))
 	{
 		OutComparisonType = TEXT("Equal");
@@ -937,16 +963,18 @@ UEdGraphNode* FAnimTransitionConditionFactory::RecreateComparisonNodeWithType(
 		return nullptr;
 	}
 
+	// Store the existing node's position and ID
 	int32 PosX = ExistingNode->NodePosX;
 	int32 PosY = ExistingNode->NodePosY;
 
+	// Get existing node ID if it has one
 	FString ExistingNodeId;
 	if (ExistingNode->NodeComment.StartsWith(TEXT("NodeId:")))
 	{
 		ExistingNodeId = ExistingNode->NodeComment.Mid(7);
 	}
 
-	// Snapshot pin B default and output connections so they can be restored on the new node
+	// Store existing connections to pin B (the value input) if any
 	FString PinBDefaultValue;
 	UEdGraphPin* OldPinB = FAnimNodePinUtils::FindPinByName(ExistingNode, TEXT("B"), EGPD_Input);
 	if (OldPinB)
@@ -954,6 +982,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::RecreateComparisonNodeWithType(
 		PinBDefaultValue = OldPinB->DefaultValue;
 	}
 
+	// Store connections to output pin
 	TArray<UEdGraphPin*> OutputConnections;
 	UEdGraphPin* OldOutput = FAnimNodePinUtils::FindPinByName(ExistingNode, TEXT("ReturnValue"), EGPD_Output);
 	if (OldOutput)
@@ -961,10 +990,11 @@ UEdGraphNode* FAnimTransitionConditionFactory::RecreateComparisonNodeWithType(
 		OutputConnections = OldOutput->LinkedTo;
 	}
 
-	// Break links before removing to keep transition graph in valid state
+	// Remove the old node from graph (break links first)
 	ExistingNode->BreakAllNodeLinks();
 	Graph->RemoveNode(ExistingNode);
 
+	// Create new comparison node with correct type
 	bool bIsBooleanType = (NewPinType == EComparisonPinType::Boolean);
 	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
 	UEdGraphNode* NewNode = CreateComparisonNode(
@@ -975,11 +1005,13 @@ UEdGraphNode* FAnimTransitionConditionFactory::RecreateComparisonNodeWithType(
 		return nullptr;
 	}
 
+	// Restore node ID
 	if (!ExistingNodeId.IsEmpty())
 	{
 		FAnimGraphEditor::SetNodeId(NewNode, ExistingNodeId);
 	}
 
+	// Restore pin B default value
 	if (!PinBDefaultValue.IsEmpty())
 	{
 		UEdGraphPin* NewPinB = FAnimNodePinUtils::FindPinByName(NewNode, TEXT("B"), EGPD_Input);
@@ -997,6 +1029,7 @@ UEdGraphNode* FAnimTransitionConditionFactory::RecreateComparisonNodeWithType(
 		}
 	}
 
+	// Restore output connections
 	UEdGraphPin* NewOutput = FAnimNodePinUtils::FindPinByName(NewNode, TEXT("ReturnValue"), EGPD_Output);
 	if (NewOutput)
 	{

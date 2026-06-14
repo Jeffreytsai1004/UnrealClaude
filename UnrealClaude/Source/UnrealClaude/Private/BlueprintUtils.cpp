@@ -54,31 +54,37 @@ TSharedPtr<FJsonObject> FBlueprintUtils::SerializeBlueprintInfo(
 		return Result;
 	}
 
+	// Basic info
 	Result->SetStringField(TEXT("name"), Blueprint->GetName());
 	Result->SetStringField(TEXT("path"), Blueprint->GetPathName());
 	Result->SetStringField(TEXT("blueprint_type"), GetBlueprintTypeString(Blueprint->BlueprintType));
 
+	// Parent class
 	if (Blueprint->ParentClass)
 	{
 		Result->SetStringField(TEXT("parent_class"), Blueprint->ParentClass->GetPathName());
 		Result->SetStringField(TEXT("parent_class_name"), Blueprint->ParentClass->GetName());
 	}
 
+	// Generated class
 	if (Blueprint->GeneratedClass)
 	{
 		Result->SetStringField(TEXT("generated_class"), Blueprint->GeneratedClass->GetPathName());
 	}
 
+	// Variables
 	if (bIncludeVariables)
 	{
 		Result->SetArrayField(TEXT("variables"), GetBlueprintVariables(Blueprint));
 	}
 
+	// Functions
 	if (bIncludeFunctions)
 	{
 		Result->SetArrayField(TEXT("functions"), GetBlueprintFunctions(Blueprint));
 	}
 
+	// Graphs
 	if (bIncludeGraphs)
 	{
 		Result->SetObjectField(TEXT("graph_info"), GetGraphInfo(Blueprint));
@@ -106,6 +112,7 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintVariables(UBlueprint
 		VarObj->SetBoolField(TEXT("is_blueprint_read_only"), (Var.PropertyFlags & CPF_BlueprintReadOnly) != 0);
 		VarObj->SetBoolField(TEXT("is_exposed_on_spawn"), (Var.PropertyFlags & CPF_ExposeOnSpawn) != 0);
 
+		// Default value if available
 		if (!Var.DefaultValue.IsEmpty())
 		{
 			VarObj->SetStringField(TEXT("default_value"), Var.DefaultValue);
@@ -126,6 +133,7 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintFunctions(UBlueprint
 		return Functions;
 	}
 
+	// Get function graphs
 	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
 	{
 		if (!Graph)
@@ -137,16 +145,18 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintFunctions(UBlueprint
 		FuncObj->SetStringField(TEXT("name"), Graph->GetName());
 		FuncObj->SetStringField(TEXT("type"), TEXT("Function"));
 
-		// Function entry node carries the input parameter pins; result node carries outputs
+		// Try to get the function entry node for more info
 		for (UEdGraphNode* Node : Graph->Nodes)
 		{
 			if (UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(Node))
 			{
+				// Get input parameters
 				TArray<TSharedPtr<FJsonValue>> Inputs;
 				for (UEdGraphPin* Pin : EntryNode->Pins)
 				{
 					if (Pin && Pin->Direction == EGPD_Output && !Pin->PinType.PinCategory.IsNone())
 					{
+						// Skip exec pins
 						if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
 						{
 							continue;
@@ -163,6 +173,7 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintFunctions(UBlueprint
 			}
 		}
 
+		// Get output parameters from function result node
 		for (UEdGraphNode* Node : Graph->Nodes)
 		{
 			if (UK2Node_FunctionResult* ResultNode = Cast<UK2Node_FunctionResult>(Node))
@@ -172,6 +183,7 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintFunctions(UBlueprint
 				{
 					if (Pin && Pin->Direction == EGPD_Input && !Pin->PinType.PinCategory.IsNone())
 					{
+						// Skip exec pins
 						if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
 						{
 							continue;
@@ -191,6 +203,7 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintFunctions(UBlueprint
 		Functions.Add(MakeShared<FJsonValueObject>(FuncObj));
 	}
 
+	// Add event graphs info
 	for (UEdGraph* Graph : Blueprint->UbergraphPages)
 	{
 		if (!Graph)
@@ -198,6 +211,7 @@ TArray<TSharedPtr<FJsonValue>> FBlueprintUtils::GetBlueprintFunctions(UBlueprint
 			continue;
 		}
 
+		// Count event nodes
 		int32 EventCount = 0;
 		for (UEdGraphNode* Node : Graph->Nodes)
 		{
@@ -234,6 +248,7 @@ TSharedPtr<FJsonObject> FBlueprintUtils::GetGraphInfo(UBlueprint* Blueprint)
 	int32 TotalEvents = 0;
 	TArray<TSharedPtr<FJsonValue>> GraphNames;
 
+	// Count nodes in all graphs
 	for (UEdGraph* Graph : Blueprint->UbergraphPages)
 	{
 		if (Graph)

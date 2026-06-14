@@ -21,9 +21,10 @@ UBlueprint* FBlueprintLoader::LoadBlueprint(const FString& BlueprintPath, FStrin
 		return nullptr;
 	}
 
+	// Try to load the Blueprint directly
 	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
 
-	// Fallback: prepend /Game/ for short paths
+	// If not found, try with /Game/ prefix
 	if (!Blueprint)
 	{
 		FString AdjustedPath = BlueprintPath;
@@ -45,6 +46,7 @@ UBlueprint* FBlueprintLoader::LoadBlueprint(const FString& BlueprintPath, FStrin
 
 bool FBlueprintLoader::ValidateBlueprintPath(const FString& BlueprintPath, FString& OutError)
 {
+	// Delegate to MCPParamValidator for comprehensive security validation
 	return FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, OutError);
 }
 
@@ -63,6 +65,7 @@ bool FBlueprintLoader::IsBlueprintEditable(UBlueprint* Blueprint, FString& OutEr
 		return false;
 	}
 
+	// Block engine Blueprints
 	FString PackageName = Package->GetName();
 	if (PackageName.StartsWith(TEXT("/Engine/")) || PackageName.StartsWith(TEXT("/Script/")))
 	{
@@ -70,6 +73,7 @@ bool FBlueprintLoader::IsBlueprintEditable(UBlueprint* Blueprint, FString& OutEr
 		return false;
 	}
 
+	// Block cooked packages
 	if (Package->HasAnyPackageFlags(PKG_Cooked))
 	{
 		OutError = TEXT("Blueprint package is read-only (cooked)");
@@ -81,10 +85,11 @@ bool FBlueprintLoader::IsBlueprintEditable(UBlueprint* Blueprint, FString& OutEr
 
 bool FBlueprintLoader::CompileBlueprint(UBlueprint* Blueprint, FString& OutError)
 {
+	// Use the detailed version and extract simple result
 	FBlueprintCompileResult Result = CompileBlueprintWithResult(Blueprint);
 	if (!Result.bSuccess)
 	{
-		// Keep verbose output flowing through OutError for backward-compat callers
+		// Return the verbose output for backward compatibility
 		OutError = Result.VerboseOutput.IsEmpty() ?
 			TEXT("Blueprint compilation failed") : Result.VerboseOutput;
 		return false;
@@ -108,17 +113,21 @@ FBlueprintCompileResult FBlueprintLoader::CompileBlueprintWithResult(UBlueprint*
 		return Result;
 	}
 
+	// Clear the message log before compile to capture fresh messages
 	const FName BlueprintLogName = TEXT("BlueprintLog");
 	FMessageLog BlueprintLog(BlueprintLogName);
 
-	// MarkAsStructurallyModified before compile forces a fresh recompile (skips incremental cache)
+	// Mark as modified before compilation
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+	// Compile the Blueprint
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
 
+	// Build verbose output from compiler status
 	TStringBuilder<1024> VerboseBuilder;
 	VerboseBuilder.Appendf(TEXT("Compiling Blueprint: %s\n"), *Blueprint->GetName());
 
+	// Determine status
 	switch (Blueprint->Status)
 	{
 	case BS_Error:
@@ -148,7 +157,8 @@ FBlueprintCompileResult FBlueprintLoader::CompileBlueprintWithResult(UBlueprint*
 		break;
 	}
 
-	// UE stores compile errors on the nodes themselves, so we walk every graph
+	// Extract error messages from the Blueprint's graphs
+	// UE stores compile errors on the nodes themselves
 	VerboseBuilder.Append(TEXT("\n--- Compiler Messages ---\n"));
 
 	auto ProcessGraph = [&](UEdGraph* Graph)
@@ -159,6 +169,7 @@ FBlueprintCompileResult FBlueprintLoader::CompileBlueprintWithResult(UBlueprint*
 		{
 			if (!Node) continue;
 
+			// Check for errors on this node
 			if (Node->bHasCompilerMessage)
 			{
 				FBlueprintCompileMessage Msg;
@@ -189,6 +200,7 @@ FBlueprintCompileResult FBlueprintLoader::CompileBlueprintWithResult(UBlueprint*
 		}
 	};
 
+	// Process all graphs for errors
 	for (UEdGraph* Graph : Blueprint->UbergraphPages)
 	{
 		ProcessGraph(Graph);
@@ -202,7 +214,7 @@ FBlueprintCompileResult FBlueprintLoader::CompileBlueprintWithResult(UBlueprint*
 		ProcessGraph(Graph);
 	}
 
-	// Force a generic error message when status is BS_Error but no per-node message was captured
+	// If no messages but status is error, add a generic message
 	if (Blueprint->Status == BS_Error && Result.Messages.Num() == 0)
 	{
 		FBlueprintCompileMessage Msg;
@@ -213,6 +225,7 @@ FBlueprintCompileResult FBlueprintLoader::CompileBlueprintWithResult(UBlueprint*
 		VerboseBuilder.Append(TEXT("[Error] Blueprint compilation failed (no specific error captured)\n"));
 	}
 
+	// Summary
 	VerboseBuilder.Appendf(TEXT("\n--- Summary ---\n"));
 	VerboseBuilder.Appendf(TEXT("Errors: %d\n"), Result.ErrorCount);
 	VerboseBuilder.Appendf(TEXT("Warnings: %d\n"), Result.WarningCount);
@@ -253,6 +266,7 @@ UBlueprint* FBlueprintLoader::CreateBlueprint(
 		return nullptr;
 	}
 
+	// Create the package path
 	FString FullPath = PackagePath / BlueprintName;
 	UPackage* Package = CreatePackage(*FullPath);
 	if (!Package)
@@ -261,10 +275,12 @@ UBlueprint* FBlueprintLoader::CreateBlueprint(
 		return nullptr;
 	}
 
+	// Create Blueprint factory
 	UBlueprintFactory* Factory = NewObject<UBlueprintFactory>();
 	Factory->ParentClass = ParentClass;
 	Factory->BlueprintType = BlueprintType;
 
+	// Create the Blueprint
 	UBlueprint* NewBlueprint = Cast<UBlueprint>(Factory->FactoryCreateNew(
 		UBlueprint::StaticClass(),
 		Package,
@@ -280,6 +296,7 @@ UBlueprint* FBlueprintLoader::CreateBlueprint(
 		return nullptr;
 	}
 
+	// Mark package dirty
 	Package->MarkPackageDirty();
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Created Blueprint: %s (Parent: %s)"),
@@ -298,9 +315,10 @@ UClass* FBlueprintLoader::FindParentClass(const FString& ParentClassName, FStrin
 
 	UClass* ParentClass = nullptr;
 
+	// Try full path first
 	ParentClass = LoadClass<UObject>(nullptr, *ParentClassName);
 
-	// Fall back through /Script/Engine, /Script/CoreUObject, and finally FindObject for short names
+	// Try common engine prefixes
 	if (!ParentClass)
 	{
 		ParentClass = LoadClass<UObject>(nullptr,
@@ -313,6 +331,7 @@ UClass* FBlueprintLoader::FindParentClass(const FString& ParentClassName, FStrin
 			*FString::Printf(TEXT("/Script/CoreUObject.%s"), *ParentClassName));
 	}
 
+	// Try finding by short name
 	if (!ParentClass)
 	{
 		ParentClass = FindObject<UClass>(nullptr, *ParentClassName);

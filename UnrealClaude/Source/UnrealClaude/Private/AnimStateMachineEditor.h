@@ -6,6 +6,7 @@
 #include "Animation/AnimBlueprint.h"
 #include "Dom/JsonObject.h"
 
+// Forward declarations
 class UAnimGraphNode_StateMachine;
 class UAnimStateNode;
 class UAnimStateTransitionNode;
@@ -406,11 +407,13 @@ public:
 	static FString GetNodeId(UEdGraphNode* Node);
 
 private:
-	// Thread-safe counter for unique IDs across concurrent MCP tool calls
+	// Thread-safe counter for unique IDs
 	static volatile int32 NodeIdCounter;
 
+	// Node ID prefix
 	static const FString NodeIdPrefix;
 
+	// Internal helpers
 	static UAnimStateNode* FindStateNodeInGraph(UAnimationStateMachineGraph* Graph, const FString& StateName);
 	static void ConnectStateNodes(UAnimStateNode* FromState, UAnimStateNode* ToState,
 								  UAnimStateTransitionNode* Transition);

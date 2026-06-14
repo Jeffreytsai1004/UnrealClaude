@@ -9,6 +9,7 @@
 
 FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Params)
 {
+	// Get parameters using centralized constants
 	int32 NumLines = UnrealClaudeConstants::MCPServer::DefaultOutputLogLines;
 	if (Params->HasField(TEXT("lines")))
 	{
@@ -18,15 +19,16 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 	FString Filter;
 	Params->TryGetStringField(TEXT("filter"), Filter);
 
-	// Absolute paths required — relative paths fail intermittently under Windows file sharing
+	// Resolve all candidate paths to absolute paths for reliable Windows file access
 	FString ProjectLogDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectLogDir());
 	FString EngineLogDir = FPaths::ConvertRelativePathToFull(FPaths::EngineDir() / TEXT("Saved/Logs"));
 
-	// Try most-specific to least-specific log locations
+	// Search for the log file across multiple candidate locations
 	FString LogFilePath;
 	bool bFound = false;
 	TArray<FString> SearchedPaths;
 
+	// 1. Project-named log in project log directory
 	{
 		FString Candidate = ProjectLogDir / FApp::GetProjectName() + TEXT(".log");
 		SearchedPaths.Add(Candidate);
@@ -37,6 +39,7 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		}
 	}
 
+	// 2. UnrealEditor.log in project log directory
 	if (!bFound)
 	{
 		FString Candidate = ProjectLogDir / TEXT("UnrealEditor.log");
@@ -48,6 +51,7 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		}
 	}
 
+	// 3. Any .log file in project log directory
 	if (!bFound)
 	{
 		TArray<FString> LogFiles;
@@ -59,6 +63,7 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		}
 	}
 
+	// 4. UnrealEditor.log in engine saved logs
 	if (!bFound)
 	{
 		FString Candidate = EngineLogDir / TEXT("UnrealEditor.log");
@@ -70,6 +75,7 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		}
 	}
 
+	// 5. Any .log file in engine saved logs
 	if (!bFound)
 	{
 		TArray<FString> LogFiles;
@@ -97,9 +103,11 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		return FMCPToolResult::Error(FString::Printf(TEXT("Failed to read log file: %s"), *LogFilePath));
 	}
 
+	// Split into lines
 	TArray<FString> AllLines;
 	LogContent.ParseIntoArrayLines(AllLines);
 
+	// Filter lines if a filter is specified
 	TArray<FString> FilteredLines;
 	if (Filter.IsEmpty())
 	{
@@ -116,6 +124,7 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		}
 	}
 
+	// Get the last N lines
 	int32 StartIndex = FMath::Max(0, FilteredLines.Num() - NumLines);
 	TArray<FString> ResultLines;
 	for (int32 i = StartIndex; i < FilteredLines.Num(); ++i)
@@ -123,6 +132,7 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		ResultLines.Add(FilteredLines[i]);
 	}
 
+	// Build result
 	FString LogOutput = FString::Join(ResultLines, TEXT("\n"));
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();

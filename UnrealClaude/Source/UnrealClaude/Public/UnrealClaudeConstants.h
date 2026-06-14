@@ -10,6 +10,7 @@
  */
 namespace UnrealClaudeConstants
 {
+	// Process and I/O
 	namespace Process
 	{
 		/** Buffer size for reading process output */
@@ -22,6 +23,7 @@ namespace UnrealClaudeConstants
 		constexpr float DefaultTimeoutSeconds = 300.0f;
 	}
 
+	// UI Dimensions
 	namespace UI
 	{
 		/** Maximum height for input text area */
@@ -40,6 +42,7 @@ namespace UnrealClaudeConstants
 		constexpr int32 MaxScriptPreviewLength = 2000;
 	}
 
+	// Session Management
 	namespace Session
 	{
 		/** Maximum number of exchanges to store in history */
@@ -49,6 +52,7 @@ namespace UnrealClaudeConstants
 		constexpr int32 MaxHistoryInPrompt = 10;
 	}
 
+	// Project Context
 	namespace Context
 	{
 		/** Maximum UCLASS definitions to parse per search */
@@ -70,6 +74,7 @@ namespace UnrealClaudeConstants
 		constexpr int32 MaxClassNameToInheritanceDistance = 50;
 	}
 
+	// Animation Blueprint Diagram Generation
 	namespace AnimDiagram
 	{
 		/** Initial X position for condition nodes in transition graphs */
@@ -91,6 +96,7 @@ namespace UnrealClaudeConstants
 		constexpr int32 MaxStateNameDisplayLength = 12;
 	}
 
+	// MCP Validation Limits
 	namespace MCPValidation
 	{
 		/** Characters that are dangerous in actor names, paths, and class paths
@@ -117,12 +123,14 @@ namespace UnrealClaudeConstants
 		constexpr int32 DefaultActorLimit = 100;
 	}
 
+	// Numeric Bounds
 	namespace NumericBounds
 	{
 		/** Maximum absolute value for coordinate values */
 		constexpr double MaxCoordinateValue = 1e10;
 	}
 
+	// Script Execution
 	namespace ScriptExecution
 	{
 		/** Maximum wait time for Live Coding compilation in seconds */
@@ -141,6 +149,7 @@ namespace UnrealClaudeConstants
 		constexpr int32 MaxHistoryQueryCount = 50;
 	}
 
+	// MCP Server
 	namespace MCPServer
 	{
 		/** Default port for MCP HTTP server */
@@ -200,6 +209,7 @@ namespace UnrealClaudeConstants
 		};
 	}
 
+	// Clipboard Image Paste
 	namespace ClipboardImage
 	{
 		/** Maximum age of saved clipboard screenshots before cleanup (seconds) */

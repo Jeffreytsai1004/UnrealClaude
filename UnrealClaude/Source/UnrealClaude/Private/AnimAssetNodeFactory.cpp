@@ -32,6 +32,7 @@ UEdGraphNode* FAnimAssetNodeFactory::CreateAnimSequenceNode(
 		return nullptr;
 	}
 
+	// Create sequence player node
 	FGraphNodeCreator<UAnimGraphNode_SequencePlayer> NodeCreator(*StateGraph);
 	UAnimGraphNode_SequencePlayer* SeqNode = NodeCreator.CreateNode();
 
@@ -44,10 +45,12 @@ UEdGraphNode* FAnimAssetNodeFactory::CreateAnimSequenceNode(
 	SeqNode->NodePosX = static_cast<int32>(Position.X);
 	SeqNode->NodePosY = static_cast<int32>(Position.Y);
 
+	// Set the animation sequence
 	SeqNode->Node.SetSequence(AnimSequence);
 
 	NodeCreator.Finalize();
 
+	// Generate ID
 	OutNodeId = FAnimGraphEditor::GenerateAnimNodeId(TEXT("Anim"), AnimSequence->GetName(), StateGraph);
 	FAnimGraphEditor::SetNodeId(SeqNode, OutNodeId);
 
@@ -75,6 +78,7 @@ UEdGraphNode* FAnimAssetNodeFactory::CreateBlendSpaceNode(
 		return nullptr;
 	}
 
+	// Create BlendSpace player node
 	FGraphNodeCreator<UAnimGraphNode_BlendSpacePlayer> NodeCreator(*StateGraph);
 	UAnimGraphNode_BlendSpacePlayer* BSNode = NodeCreator.CreateNode();
 
@@ -87,10 +91,12 @@ UEdGraphNode* FAnimAssetNodeFactory::CreateBlendSpaceNode(
 	BSNode->NodePosX = static_cast<int32>(Position.X);
 	BSNode->NodePosY = static_cast<int32>(Position.Y);
 
+	// Set the BlendSpace
 	BSNode->Node.SetBlendSpace(BlendSpace);
 
 	NodeCreator.Finalize();
 
+	// Generate ID
 	OutNodeId = FAnimGraphEditor::GenerateAnimNodeId(TEXT("BlendSpace"), BlendSpace->GetName(), StateGraph);
 	FAnimGraphEditor::SetNodeId(BSNode, OutNodeId);
 
@@ -131,10 +137,12 @@ UEdGraphNode* FAnimAssetNodeFactory::CreateBlendSpace1DNode(
 	BSNode->NodePosX = static_cast<int32>(Position.X);
 	BSNode->NodePosY = static_cast<int32>(Position.Y);
 
+	// Set the BlendSpace
 	BSNode->Node.SetBlendSpace(BlendSpace);
 
 	NodeCreator.Finalize();
 
+	// Generate ID
 	OutNodeId = FAnimGraphEditor::GenerateAnimNodeId(TEXT("BlendSpace1D"), BlendSpace->GetName(), StateGraph);
 	FAnimGraphEditor::SetNodeId(BSNode, OutNodeId);
 
@@ -154,6 +162,7 @@ bool FAnimAssetNodeFactory::ConnectToOutputPose(
 		return false;
 	}
 
+	// Find anim node
 	UEdGraphNode* AnimNode = FAnimGraphEditor::FindNodeById(StateGraph, AnimNodeId);
 	if (!AnimNode)
 	{
@@ -161,6 +170,7 @@ bool FAnimAssetNodeFactory::ConnectToOutputPose(
 		return false;
 	}
 
+	// Find pose output pin on anim node
 	auto PoseOutputConfig = FPinSearchConfig::Output({
 		FName("Pose"),
 		FName("Output"),
@@ -173,6 +183,7 @@ bool FAnimAssetNodeFactory::ConnectToOutputPose(
 		return false;
 	}
 
+	// Find result node
 	UEdGraphNode* ResultNode = FAnimNodePinUtils::FindResultNode(StateGraph);
 	if (!ResultNode)
 	{
@@ -180,6 +191,7 @@ bool FAnimAssetNodeFactory::ConnectToOutputPose(
 		return false;
 	}
 
+	// Find result input pin
 	auto ResultConfig = FPinSearchConfig::Input({
 		FName("Result"),
 		FName("Pose"),
@@ -193,6 +205,7 @@ bool FAnimAssetNodeFactory::ConnectToOutputPose(
 		return false;
 	}
 
+	// Make connection
 	PosePin->MakeLinkTo(ResultPin);
 	StateGraph->Modify();
 
@@ -207,9 +220,11 @@ bool FAnimAssetNodeFactory::ClearStateGraph(UEdGraph* StateGraph, FString& OutEr
 		return false;
 	}
 
+	// Collect nodes to remove (exclude result node)
 	TArray<UEdGraphNode*> NodesToRemove;
 	for (UEdGraphNode* Node : StateGraph->Nodes)
 	{
+		// Keep result nodes
 		if (Node->IsA<UAnimGraphNode_StateResult>() ||
 			Node->IsA<UAnimGraphNode_TransitionResult>())
 		{
@@ -219,6 +234,7 @@ bool FAnimAssetNodeFactory::ClearStateGraph(UEdGraph* StateGraph, FString& OutEr
 		NodesToRemove.Add(Node);
 	}
 
+	// Remove nodes
 	for (UEdGraphNode* Node : NodesToRemove)
 	{
 		Node->BreakAllNodeLinks();

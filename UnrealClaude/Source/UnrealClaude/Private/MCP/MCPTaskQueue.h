@@ -8,6 +8,7 @@
 #include "HAL/RunnableThread.h"
 #include "Containers/Queue.h"
 
+// Forward declarations
 class FMCPToolRegistry;
 
 /**
@@ -101,6 +102,7 @@ public:
 	FMCPTaskQueueConfig Config;
 
 protected:
+	// FRunnable interface
 	virtual bool Init() override;
 	virtual uint32 Run() override;
 	virtual void Stop() override;

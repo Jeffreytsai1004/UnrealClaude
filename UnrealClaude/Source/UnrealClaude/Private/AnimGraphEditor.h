@@ -7,6 +7,7 @@
 #include "Dom/JsonObject.h"
 #include "AnimNodePinUtils.h"  // For FPinSearchConfig
 
+// Forward declarations
 class UAnimGraphNode_StateMachine;
 class UAnimGraphNode_Root;
 class UAnimStateNode;
@@ -321,11 +322,13 @@ public:
 	);
 
 private:
-	// Thread-safe counter for unique IDs across concurrent MCP tool calls
+	// Thread-safe counter for unique IDs
 	static volatile int32 NodeIdCounter;
 
+	// Node ID prefix
 	static const FString NodeIdPrefix;
 
+	// Internal node creation helpers
 	static UEdGraphNode* CreateTimeRemainingNode(UEdGraph* Graph,
 		const TSharedPtr<FJsonObject>& Params, FVector2D Position, FString& OutError);
 	static UEdGraphNode* CreateComparisonNode(UEdGraph* Graph, const FString& ComparisonType,

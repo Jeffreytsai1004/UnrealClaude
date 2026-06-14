@@ -33,11 +33,12 @@ UAnimBlueprint* FAnimationBlueprintUtils::LoadAnimBlueprint(const FString& Bluep
 		return nullptr;
 	}
 
+	// Try to load the asset
 	UObject* LoadedAsset = StaticLoadObject(UAnimBlueprint::StaticClass(), nullptr, *BlueprintPath);
 
 	if (!LoadedAsset)
 	{
-		// Fallback: prepend /Game/ and append .AssetName if a short path was given
+		// Try with different path formats
 		FString AdjustedPath = BlueprintPath;
 		if (!AdjustedPath.StartsWith(TEXT("/")))
 		{
@@ -88,7 +89,7 @@ bool FAnimationBlueprintUtils::CompileAnimBlueprint(UAnimBlueprint* AnimBP, FStr
 		return false;
 	}
 
-	// Auto-save after successful compile so MCP callers see the change on disk
+	// Auto-save after successful compile
 	FString AssetPath = AnimBP->GetPathName();
 	if (!UEditorAssetLibrary::SaveAsset(AssetPath, false))
 	{
@@ -428,6 +429,7 @@ UEdGraphNode* FAnimationBlueprintUtils::AddConditionNode(
 		return nullptr;
 	}
 
+	// Find transition graph
 	UEdGraph* TransitionGraph = FAnimGraphEditor::FindTransitionGraph(
 		AnimBP, StateMachineName, FromStateName, ToStateName, OutError);
 
@@ -460,6 +462,7 @@ bool FAnimationBlueprintUtils::DeleteConditionNode(
 		return false;
 	}
 
+	// Find transition graph
 	UEdGraph* TransitionGraph = FAnimGraphEditor::FindTransitionGraph(
 		AnimBP, StateMachineName, FromStateName, ToStateName, OutError);
 
@@ -468,6 +471,7 @@ bool FAnimationBlueprintUtils::DeleteConditionNode(
 		return false;
 	}
 
+	// Find the node by ID
 	UEdGraphNode* NodeToDelete = FAnimGraphEditor::FindNodeById(TransitionGraph, NodeId);
 	if (!NodeToDelete)
 	{
@@ -475,7 +479,7 @@ bool FAnimationBlueprintUtils::DeleteConditionNode(
 		return false;
 	}
 
-	// Deleting the result node would orphan the transition rule — disallow
+	// Don't allow deleting the result node
 	UEdGraphNode* ResultNode = FAnimGraphEditor::FindResultNode(TransitionGraph);
 	if (NodeToDelete == ResultNode)
 	{
@@ -483,8 +487,10 @@ bool FAnimationBlueprintUtils::DeleteConditionNode(
 		return false;
 	}
 
-	// Break links before removing to leave the graph in a valid state
+	// Break all connections first
 	NodeToDelete->BreakAllNodeLinks();
+
+	// Remove the node from the graph
 	TransitionGraph->RemoveNode(NodeToDelete);
 
 	MarkAnimBlueprintModified(AnimBP);
@@ -574,17 +580,20 @@ bool FAnimationBlueprintUtils::SetStateAnimSequence(
 		return false;
 	}
 
+	// Load the animation sequence
 	UAnimSequence* AnimSequence = FAnimAssetManager::LoadAnimSequence(AnimSequencePath, OutError);
 	if (!AnimSequence)
 	{
 		return false;
 	}
 
+	// Validate compatibility
 	if (!FAnimAssetManager::ValidateAnimationCompatibility(AnimBP, AnimSequence, OutError))
 	{
 		return false;
 	}
 
+	// Set the animation
 	bool bResult = FAnimAssetManager::SetStateAnimSequence(
 		AnimBP, StateMachineName, StateName, AnimSequence, OutError);
 
@@ -731,6 +740,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SerializeAnimBlueprintInfo(UAn
 	Result->SetStringField(TEXT("name"), AnimBP->GetName());
 	Result->SetStringField(TEXT("path"), AnimBP->GetPathName());
 
+	// Skeleton info
 	USkeleton* Skeleton = FAnimAssetManager::GetTargetSkeleton(AnimBP);
 	if (Skeleton)
 	{
@@ -738,6 +748,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SerializeAnimBlueprintInfo(UAn
 		Result->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
 	}
 
+	// State machines
 	TArray<TSharedPtr<FJsonValue>> StateMachinesArray;
 	TArray<UAnimGraphNode_StateMachine*> StateMachines = GetAllStateMachines(AnimBP);
 	for (UAnimGraphNode_StateMachine* SM : StateMachines)
@@ -768,6 +779,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SerializeStateMachineInfo(
 	TSharedPtr<FJsonObject> Result = FAnimStateMachineEditor::SerializeStateMachineInfo(SM);
 	Result->SetBoolField(TEXT("success"), true);
 
+	// Add states
 	TArray<TSharedPtr<FJsonValue>> StatesArray;
 	TArray<UAnimStateNode*> States = GetAllStates(AnimBP, StateMachineName, Error);
 	for (UAnimStateNode* State : States)
@@ -776,6 +788,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SerializeStateMachineInfo(
 	}
 	Result->SetArrayField(TEXT("states"), StatesArray);
 
+	// Add transitions
 	TArray<TSharedPtr<FJsonValue>> TransitionsArray;
 	TArray<UAnimStateTransitionNode*> Transitions = GetAllTransitions(AnimBP, StateMachineName, Error);
 	for (UAnimStateTransitionNode* Transition : Transitions)
@@ -841,6 +854,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ExecuteBatchOperations(
 		FString OpError;
 		bool bOpSuccess = false;
 
+		// Execute operation based on type
 		if (OpType == TEXT("add_state"))
 		{
 			FString NodeId;
@@ -981,6 +995,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ExecuteBatchOperations(
 			bOpSuccess = ChainResult.IsValid() && ChainResult->GetBoolField(TEXT("success"));
 			if (bOpSuccess)
 			{
+				// Include node IDs in the result
 				if (ChainResult->HasField(TEXT("variable_node_id")))
 				{
 					OpResult->SetStringField(TEXT("variable_node_id"), ChainResult->GetStringField(TEXT("variable_node_id")));
@@ -1071,6 +1086,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ExecuteBatchOperations(
 		ResultsArray.Add(MakeShared<FJsonValueObject>(OpResult));
 	}
 
+	// Compile after all operations
 	FString CompileError;
 	bool bCompiled = CompileAnimBlueprint(AnimBP, CompileError);
 
@@ -1104,12 +1120,13 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetTransitionNodes(
 		return ErrorResult;
 	}
 
-	// Empty From/To means caller wants every transition in the state machine
+	// If FromState and ToState are empty, get all transitions in state machine
 	if (FromState.IsEmpty() && ToState.IsEmpty())
 	{
 		return FAnimGraphEditor::GetAllTransitionNodes(AnimBP, StateMachineName, OutError);
 	}
 
+	// Get single transition graph nodes
 	UEdGraph* TransitionGraph = FAnimGraphEditor::FindTransitionGraph(
 		AnimBP, StateMachineName, FromState, ToState, OutError);
 
@@ -1145,6 +1162,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::InspectNodePins(
 		return Result;
 	}
 
+	// Find transition graph
 	UEdGraph* TransitionGraph = FAnimGraphEditor::FindTransitionGraph(
 		AnimBP, StateMachineName, FromState, ToState, OutError);
 
@@ -1155,6 +1173,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::InspectNodePins(
 		return Result;
 	}
 
+	// Find the node
 	UEdGraphNode* Node = FAnimGraphEditor::FindNodeById(TransitionGraph, NodeId);
 	if (!Node)
 	{
@@ -1171,6 +1190,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::InspectNodePins(
 	Result->SetNumberField(TEXT("pos_x"), Node->NodePosX);
 	Result->SetNumberField(TEXT("pos_y"), Node->NodePosY);
 
+	// Detailed pins with full type info
 	TArray<TSharedPtr<FJsonValue>> InputPins;
 	TArray<TSharedPtr<FJsonValue>> OutputPins;
 
@@ -1211,6 +1231,7 @@ bool FAnimationBlueprintUtils::SetPinDefaultValue(
 		return false;
 	}
 
+	// Find transition graph
 	UEdGraph* TransitionGraph = FAnimGraphEditor::FindTransitionGraph(
 		AnimBP, StateMachineName, FromState, ToState, OutError);
 
@@ -1249,6 +1270,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::AddComparisonChain(
 		return ErrorResult;
 	}
 
+	// Find transition graph
 	UEdGraph* TransitionGraph = FAnimGraphEditor::FindTransitionGraph(
 		AnimBP, StateMachineName, FromState, ToState, OutError);
 
@@ -1290,12 +1312,14 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 	Result->SetStringField(TEXT("blueprint_path"), AnimBP->GetPathName());
 	Result->SetStringField(TEXT("blueprint_name"), AnimBP->GetName());
 
-	// Force a compile so AnimBP->Status reflects the current graph, not stale state
+	// Compile the blueprint to get fresh status
 	FKismetEditorUtilities::CompileBlueprint(AnimBP);
 
+	// Build result based on status
 	bool bIsValid = (AnimBP->Status != BS_Error);
 	Result->SetBoolField(TEXT("is_valid"), bIsValid);
 
+	// Status string
 	FString StatusStr;
 	switch (AnimBP->Status)
 	{
@@ -1308,6 +1332,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 	}
 	Result->SetStringField(TEXT("status"), StatusStr);
 
+	// Collect info about state machines and their states
 	TArray<TSharedPtr<FJsonValue>> StateMachinesInfo;
 	TArray<UAnimGraphNode_StateMachine*> StateMachines = GetAllStateMachines(AnimBP);
 	int32 TotalStates = 0;
@@ -1321,11 +1346,13 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 		FString SMName = SM->GetStateMachineName();
 		SMObj->SetStringField(TEXT("name"), SMName);
 
+		// Get states
 		FString Error;
 		TArray<UAnimStateNode*> States = FAnimStateMachineEditor::GetAllStates(AnimBP, SMName, Error);
 		SMObj->SetNumberField(TEXT("state_count"), States.Num());
 		TotalStates += States.Num();
 
+		// Get transitions
 		TArray<UAnimStateTransitionNode*> Transitions = FAnimStateMachineEditor::GetAllTransitions(AnimBP, SMName, Error);
 		SMObj->SetNumberField(TEXT("transition_count"), Transitions.Num());
 		TotalTransitions += Transitions.Num();
@@ -1337,10 +1364,12 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 	Result->SetNumberField(TEXT("total_states"), TotalStates);
 	Result->SetNumberField(TEXT("total_transitions"), TotalTransitions);
 
+	// Check for common issues
 	TArray<TSharedPtr<FJsonValue>> IssuesArray;
 	int32 ErrorCount = 0;
 	int32 WarningCount = 0;
 
+	// Check if skeleton is assigned
 	if (!AnimBP->TargetSkeleton)
 	{
 		TSharedPtr<FJsonObject> Issue = MakeShared<FJsonObject>();
@@ -1351,6 +1380,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 		ErrorCount++;
 	}
 
+	// Check for empty state machines
 	for (UAnimGraphNode_StateMachine* SM : StateMachines)
 	{
 		if (!SM) continue;
@@ -1369,6 +1399,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 		}
 	}
 
+	// Update is_valid based on errors found
 	if (ErrorCount > 0)
 	{
 		bIsValid = false;
@@ -1442,19 +1473,22 @@ bool FAnimationBlueprintUtils::MatchesPattern(const FString& StateName, const TS
 		return false;
 	}
 
+	// String pattern (exact, wildcard, or regex)
 	if (Pattern->Type == EJson::String)
 	{
 		FString PatternStr = Pattern->AsString();
 
-		// MatchesRegex returns false for non-regex-looking patterns, so wildcard is the fallback
+		// Try regex first (if it looks like regex)
 		if (MatchesRegex(StateName, PatternStr))
 		{
 			return true;
 		}
 
+		// Try wildcard matching
 		return MatchesWildcard(StateName, PatternStr);
 	}
 
+	// Array pattern (list of states)
 	if (Pattern->Type == EJson::Array)
 	{
 		const TArray<TSharedPtr<FJsonValue>>& PatternList = Pattern->AsArray();
@@ -1493,6 +1527,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 		return Result;
 	}
 
+	// Get all transitions in the state machine
 	TArray<UAnimStateTransitionNode*> AllTransitions = FAnimStateMachineEditor::GetAllTransitions(
 		AnimBP, StateMachineName, OutError);
 
@@ -1504,6 +1539,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 		return Result;
 	}
 
+	// Process each rule
 	for (int32 RuleIndex = 0; RuleIndex < Rules.Num(); RuleIndex++)
 	{
 		const TSharedPtr<FJsonValue>& RuleValue = Rules[RuleIndex];
@@ -1522,6 +1558,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 
 		const TSharedPtr<FJsonObject>& RuleObj = *RuleObjPtr;
 
+		// Get match patterns
 		const TSharedPtr<FJsonObject>* MatchObjPtr;
 		if (!RuleObj->TryGetObjectField(TEXT("match"), MatchObjPtr) || !MatchObjPtr->IsValid())
 		{
@@ -1549,6 +1586,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 			continue;
 		}
 
+		// Get conditions
 		const TArray<TSharedPtr<FJsonValue>>* ConditionsPtr;
 		if (!RuleObj->TryGetArrayField(TEXT("conditions"), ConditionsPtr) || !ConditionsPtr)
 		{
@@ -1565,8 +1603,10 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 		FString Logic = RuleObj->GetStringField(TEXT("logic"));
 		if (Logic.IsEmpty()) Logic = TEXT("AND");
 
+		// Track matched transitions for this rule
 		TArray<TSharedPtr<FJsonValue>> RuleMatchedTransitions;
 
+		// Find matching transitions
 		for (UAnimStateTransitionNode* Transition : AllTransitions)
 		{
 			if (!Transition) continue;
@@ -1579,6 +1619,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 			FString FromStateName = PrevState->GetStateName();
 			FString ToStateName = NextState->GetStateName();
 
+			// Check if this transition matches the pattern
 			bool bFromMatches = MatchesPattern(FromStateName, FromPattern);
 			bool bToMatches = MatchesPattern(ToStateName, ToPattern);
 
@@ -1586,6 +1627,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 
 			MatchedTransitions++;
 
+			// Apply conditions to this transition
 			TSharedPtr<FJsonObject> TransitionResult = MakeShared<FJsonObject>();
 			TransitionResult->SetStringField(TEXT("from_state"), FromStateName);
 			TransitionResult->SetStringField(TEXT("to_state"), ToStateName);
@@ -1594,6 +1636,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 			bool bConditionSuccess = true;
 			TArray<TSharedPtr<FJsonValue>> AppliedConditions;
 
+			// Get transition graph
 			UEdGraph* TransitionGraph = GetTransitionGraph(AnimBP, StateMachineName, FromStateName, ToStateName, ConditionError);
 			if (!TransitionGraph)
 			{
@@ -1604,11 +1647,12 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 				continue;
 			}
 
-			// Collected so we can wire them together with AND/OR after the loop
+			// Track node IDs for connecting with logic operators
 			TArray<FString> ConditionNodeIds;
 			int32 PosX = UnrealClaudeConstants::AnimDiagram::ConditionNodeStartX;
 			int32 PosY = UnrealClaudeConstants::AnimDiagram::ConditionNodeStartY;
 
+			// Apply each condition
 			for (const TSharedPtr<FJsonValue>& CondValue : Conditions)
 			{
 				const TSharedPtr<FJsonObject>* CondObjPtr;
@@ -1622,11 +1666,13 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 				FString Comparison = CondObj->GetStringField(TEXT("comparison"));
 				FString Value = CondObj->GetStringField(TEXT("value"));
 
+				// Handle TimeRemaining condition
 				if (CondType.Equals(TEXT("TimeRemaining"), ESearchCase::IgnoreCase))
 				{
 					FString NodeError;
 					FString TimeNodeId;
 
+					// Create TimeRemaining node
 					UEdGraphNode* TimeNode = AddConditionNode(
 						AnimBP, StateMachineName, FromStateName, ToStateName,
 						TEXT("TimeRemaining"), nullptr, FVector2D(PosX, PosY),
@@ -1640,6 +1686,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 					}
 					else
 					{
+						// Create comparison node
 						FString CompNodeId;
 						UEdGraphNode* CompNode = AddConditionNode(
 							AnimBP, StateMachineName, FromStateName, ToStateName,
@@ -1648,12 +1695,14 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 
 						if (CompNode)
 						{
+							// Connect TimeRemaining to comparison A
 							ConnectConditionNodes(
 								AnimBP, StateMachineName, FromStateName, ToStateName,
 								TimeNodeId, TEXT("ReturnValue"),
 								CompNodeId, TEXT("A"),
 								NodeError);
 
+							// Set comparison value on B
 							SetPinDefaultValue(AnimBP, StateMachineName, FromStateName, ToStateName,
 								CompNodeId, TEXT("B"), Value, NodeError);
 
@@ -1671,6 +1720,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 					}
 					CondResult->SetStringField(TEXT("type"), TEXT("TimeRemaining"));
 				}
+				// Handle variable comparison condition
 				else if (!Variable.IsEmpty())
 				{
 					FString ChainError;
@@ -1706,9 +1756,11 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 				PosY += 150;
 			}
 
-			// AND is already wired by CreateComparisonChain; OR needs an explicit chain of OR nodes
+			// If multiple conditions and using OR logic, we need to connect with OR nodes
+			// (AND logic is handled automatically by CreateComparisonChain)
 			if (ConditionNodeIds.Num() > 1 && Logic.Equals(TEXT("OR"), ESearchCase::IgnoreCase))
 			{
+				// Create OR chain
 				FString OrError;
 				FString PreviousNodeId = ConditionNodeIds[0];
 
@@ -1722,12 +1774,14 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 
 					if (OrNode)
 					{
+						// Connect previous result to OR input A
 						ConnectConditionNodes(
 							AnimBP, StateMachineName, FromStateName, ToStateName,
 							PreviousNodeId, TEXT("ReturnValue"),
 							OrNodeId, TEXT("A"),
 							OrError);
 
+						// Connect current condition to OR input B
 						ConnectConditionNodes(
 							AnimBP, StateMachineName, FromStateName, ToStateName,
 							ConditionNodeIds[i], TEXT("ReturnValue"),
@@ -1738,6 +1792,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 					}
 				}
 
+				// Connect final OR output to result
 				if (!PreviousNodeId.IsEmpty())
 				{
 					ConnectToTransitionResult(
@@ -1760,6 +1815,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 			}
 		}
 
+		// Add rule result
 		TSharedPtr<FJsonObject> RuleResult = MakeShared<FJsonObject>();
 		RuleResult->SetNumberField(TEXT("rule_index"), RuleIndex);
 		RuleResult->SetNumberField(TEXT("matched_count"), RuleMatchedTransitions.Num());
@@ -1767,7 +1823,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 		ResultsArray.Add(MakeShared<FJsonValueObject>(RuleResult));
 	}
 
-	// Single compile at the end keeps per-rule edits cheap
+	// Compile once after all operations
 	FString CompileError;
 	bool bCompiled = CompileAnimBlueprint(AnimBP, CompileError);
 
@@ -1802,17 +1858,20 @@ FString FAnimationBlueprintUtils::AbbreviateTransitionCondition(UAnimStateTransi
 		return TEXT("(none)");
 	}
 
+	// Find what's connected to the result node
 	TArray<FString> ConditionParts;
 
 	for (UEdGraphNode* Node : TransitionGraph->Nodes)
 	{
 		if (!Node) continue;
 
+		// Check for UK2Node_CallFunction comparison nodes
 		if (UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
 		{
 			FName FunctionName = CallNode->FunctionReference.GetMemberName();
 			FString FuncStr = FunctionName.ToString();
 
+			// Detect comparison functions
 			FString CompOp;
 			bool bIsComparison = false;
 
@@ -1849,7 +1908,7 @@ FString FAnimationBlueprintUtils::AbbreviateTransitionCondition(UAnimStateTransi
 
 			if (bIsComparison)
 			{
-				// Input A is the LHS of the comparison (usually a variable get); B is the RHS literal
+				// Get what's connected to input A (usually variable)
 				FString LeftSide = TEXT("?");
 				FString RightSide = TEXT("?");
 
@@ -1864,12 +1923,14 @@ FString FAnimationBlueprintUtils::AbbreviateTransitionCondition(UAnimStateTransi
 							UEdGraphPin* SourcePin = Pin->LinkedTo[0];
 							if (SourcePin && SourcePin->GetOwningNode())
 							{
+								// Check if source is a variable get node
 								if (UK2Node_VariableGet* VarNode = Cast<UK2Node_VariableGet>(SourcePin->GetOwningNode()))
 								{
 									LeftSide = VarNode->GetVarName().ToString();
 								}
 								else if (UK2Node_TransitionRuleGetter* GetterNode = Cast<UK2Node_TransitionRuleGetter>(SourcePin->GetOwningNode()))
 								{
+									// It's a TimeRemaining node
 									LeftSide = TEXT("TimeRem");
 								}
 							}
@@ -1895,13 +1956,15 @@ FString FAnimationBlueprintUtils::AbbreviateTransitionCondition(UAnimStateTransi
 				ConditionParts.Add(FString::Printf(TEXT("%s%s%s"), *LeftSide, *CompOp, *RightSide));
 			}
 		}
-		// Bare TimeRemaining getters with no comparison wire straight into the result
+		// Check for TimeRemaining getter that's directly connected
 		else if (UK2Node_TransitionRuleGetter* GetterNode = Cast<UK2Node_TransitionRuleGetter>(Node))
 		{
+			// Check if output is directly connected to result (no comparison)
 			for (UEdGraphPin* Pin : GetterNode->Pins)
 			{
 				if (Pin && Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
 				{
+					// If connected directly to result node input
 					UEdGraphNode* TargetNode = Pin->LinkedTo[0]->GetOwningNode();
 					if (TargetNode && TargetNode->IsA<UAnimGraphNode_TransitionResult>())
 					{
@@ -1926,7 +1989,10 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 {
 	if (States.Num() == 0) return;
 
-	// Layout algorithm: anchor entry state at column 0, then BFS-place successors rightward
+	// Simple layout: find entry state, put it on left
+	// Then place connected states to the right, spreading vertically
+
+	// Find entry state and put at (0, 0)
 	int32 EntryIndex = -1;
 	for (int32 i = 0; i < States.Num(); i++)
 	{
@@ -1939,7 +2005,7 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 		}
 	}
 
-	// If no state is flagged as entry, anchor on the first state instead
+	// If no entry state found, use first state
 	if (EntryIndex == -1 && States.Num() > 0)
 	{
 		EntryIndex = 0;
@@ -1947,12 +2013,14 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 		States[0].GridY = 0;
 	}
 
+	// Build adjacency for BFS layout
 	TMap<FString, TArray<FString>> Outgoing;
 	for (const FDiagramTransition& Trans : Transitions)
 	{
 		Outgoing.FindOrAdd(Trans.FromState).Add(Trans.ToState);
 	}
 
+	// BFS to assign grid positions
 	TSet<FString> Visited;
 	TArray<FString> Queue;
 
@@ -1965,12 +2033,14 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 	int32 CurrentX = 0;
 	while (Queue.Num() > 0)
 	{
+		// Get all states at current X level
 		TArray<FString> CurrentLevel = Queue;
 		Queue.Empty();
 
 		int32 YOffset = 0;
 		for (const FString& StateName : CurrentLevel)
 		{
+			// Find and set Y position for states at this X level
 			for (FDiagramState& State : States)
 			{
 				if (State.Name == StateName && State.GridX == CurrentX)
@@ -1980,6 +2050,7 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 				}
 			}
 
+			// Add connected states to next level
 			if (TArray<FString>* Connected = Outgoing.Find(StateName))
 			{
 				for (const FString& NextState : *Connected)
@@ -1989,6 +2060,7 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 						Visited.Add(NextState);
 						Queue.Add(NextState);
 
+						// Assign X position
 						for (FDiagramState& State : States)
 						{
 							if (State.Name == NextState)
@@ -2004,7 +2076,7 @@ void FAnimationBlueprintUtils::CalculateStateLayout(
 		CurrentX++;
 	}
 
-	// Disconnected states get parked in their own column past everything else
+	// Handle disconnected states
 	int32 DisconnectedY = 0;
 	for (FDiagramState& State : States)
 	{
@@ -2025,6 +2097,7 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 		return TEXT("(empty state machine)");
 	}
 
+	// Find grid dimensions
 	int32 MaxX = 0, MaxY = 0;
 	for (const FDiagramState& State : States)
 	{
@@ -2032,29 +2105,35 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 		MaxY = FMath::Max(MaxY, State.GridY);
 	}
 
-	// Each grid cell renders as "[ StateName ]" with optional arrow + condition row beneath
+	// Build a grid-based diagram
+	// Each cell is roughly: "[ StateName ]" with transitions between
 	const int32 CellWidth = UnrealClaudeConstants::AnimDiagram::DiagramCellWidth;
 	const int32 CellHeight = UnrealClaudeConstants::AnimDiagram::DiagramCellHeight;
 
+	// Create output lines
 	TArray<FString> Lines;
 	FString TitleLine = TEXT("State Machine Diagram:");
 	Lines.Add(TitleLine);
 	Lines.Add(TEXT(""));
 
+	// Build state map by grid position
 	TMap<TPair<int32, int32>, const FDiagramState*> StateGrid;
 	for (const FDiagramState& State : States)
 	{
 		StateGrid.Add(TPair<int32, int32>(State.GridX, State.GridY), &State);
 	}
 
+	// Build transition map
 	TMap<TPair<FString, FString>, const FDiagramTransition*> TransitionMap;
 	for (const FDiagramTransition& Trans : Transitions)
 	{
 		TransitionMap.Add(TPair<FString, FString>(Trans.FromState, Trans.ToState), &Trans);
 	}
 
+	// Generate diagram row by row
 	for (int32 y = 0; y <= MaxY; y++)
 	{
+		// State row
 		FString StateRow;
 		FString ArrowRow;
 		FString ConditionRow;
@@ -2065,6 +2144,7 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 			{
 				const FDiagramState& State = **StatePtr;
 
+				// Format state name with brackets
 				FString StateName = State.Name;
 				if (StateName.Len() > UnrealClaudeConstants::AnimDiagram::MaxStateNameDisplayLength)
 				{
@@ -2082,8 +2162,10 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 				}
 				StateRow += StateBox;
 
+				// Find transition to next column
 				if (x < MaxX)
 				{
+					// Look for any transition from this state to states in next column
 					bool bFoundTransition = false;
 					for (int32 nextY = 0; nextY <= MaxY; nextY++)
 					{
@@ -2094,6 +2176,7 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 								TPair<FString, FString>(State.Name, NextState.Name)))
 							{
 								ArrowRow += TEXT(" ----> ");
+								// Add abbreviated condition
 								FString Cond = (*TransPtr)->ConditionAbbrev;
 								if (Cond.Len() > 15)
 								{
@@ -2115,6 +2198,7 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 			}
 			else
 			{
+				// Empty cell
 				StateRow += FString::Printf(TEXT("%*s"), CellWidth, TEXT(""));
 				if (x < MaxX)
 				{
@@ -2136,11 +2220,13 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 		Lines.Add(TEXT(""));
 	}
 
+	// Add legend
 	Lines.Add(TEXT("Legend:"));
 	Lines.Add(TEXT("  -> = Entry state"));
 	Lines.Add(TEXT("  [...] = State name"));
 	Lines.Add(TEXT("  ----> = Transition (condition below)"));
 
+	// Add transition list
 	Lines.Add(TEXT(""));
 	Lines.Add(TEXT("All Transitions:"));
 	for (const FDiagramTransition& Trans : Transitions)
@@ -2166,6 +2252,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 		return Result;
 	}
 
+	// Find state machine
 	UAnimGraphNode_StateMachine* StateMachine = FindStateMachine(AnimBP, StateMachineName, OutError);
 	if (!StateMachine)
 	{
@@ -2174,12 +2261,15 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 		return Result;
 	}
 
+	// Get all states
 	TArray<UAnimStateNode*> States = GetAllStates(AnimBP, StateMachineName, OutError);
 	TArray<UAnimStateTransitionNode*> Transitions = GetAllTransitions(AnimBP, StateMachineName, OutError);
 
+	// Build diagram data structures
 	TArray<FDiagramState> DiagramStates;
 	TArray<FDiagramTransition> DiagramTransitions;
 
+	// Find entry state
 	UAnimationStateMachineGraph* Graph = nullptr;
 	if (StateMachine->EditorStateMachineGraph)
 	{
@@ -2189,6 +2279,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 	FString EntryStateName;
 	if (Graph && Graph->EntryNode)
 	{
+		// Find what the entry node connects to
 		for (UEdGraphPin* Pin : Graph->EntryNode->Pins)
 		{
 			if (Pin && Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
@@ -2203,6 +2294,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 		}
 	}
 
+	// Populate states
 	for (UAnimStateNode* State : States)
 	{
 		if (!State) continue;
@@ -2211,6 +2303,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 		DS.Name = State->GetStateName();
 		DS.bIsEntry = (DS.Name == EntryStateName);
 
+		// Get animation name if available
 		UEdGraph* StateGraph = State->GetBoundGraph();
 		if (StateGraph)
 		{
@@ -2218,6 +2311,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 			{
 				if (UAnimGraphNode_SequencePlayer* SeqNode = Cast<UAnimGraphNode_SequencePlayer>(Node))
 				{
+					// Get animation sequence name
 					if (SeqNode->GetAnimationAsset())
 					{
 						DS.AnimationName = SeqNode->GetAnimationAsset()->GetName();
@@ -2238,6 +2332,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 		DiagramStates.Add(DS);
 	}
 
+	// Populate transitions
 	for (UAnimStateTransitionNode* Trans : Transitions)
 	{
 		if (!Trans) continue;
@@ -2256,12 +2351,16 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 		DiagramTransitions.Add(DT);
 	}
 
+	// Calculate layout
 	CalculateStateLayout(DiagramStates, DiagramTransitions);
 
+	// Generate ASCII diagram
 	FString ASCIIDiagram = GenerateASCIIDiagram(DiagramStates, DiagramTransitions);
 
+	// Build enhanced JSON info
 	TSharedPtr<FJsonObject> EnhancedInfo = MakeShared<FJsonObject>();
 
+	// States with positions
 	TArray<TSharedPtr<FJsonValue>> StatesArray;
 	for (const FDiagramState& DS : DiagramStates)
 	{
@@ -2278,6 +2377,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 	}
 	EnhancedInfo->SetArrayField(TEXT("states"), StatesArray);
 
+	// Transitions with conditions
 	TArray<TSharedPtr<FJsonValue>> TransitionsArray;
 	for (const FDiagramTransition& DT : DiagramTransitions)
 	{
@@ -2290,6 +2390,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
 	}
 	EnhancedInfo->SetArrayField(TEXT("transitions"), TransitionsArray);
 
+	// Build result
 	Result->SetBoolField(TEXT("success"), true);
 	Result->SetStringField(TEXT("state_machine"), StateMachineName);
 	Result->SetStringField(TEXT("ascii_diagram"), ASCIIDiagram);
